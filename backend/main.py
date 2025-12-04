@@ -7,6 +7,9 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from thefuzz import process
+import sqlite3
+from pydantic import BaseModel
+from typing import Optional
 
 # Load environment variables
 load_dotenv()
@@ -261,8 +264,50 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
 
     return sorted(results, key=lambda x: x['ev'], reverse=True)
 
+
 # ---------------------------------------------------------
-# 4. API ENDPOINT
+# 4. DATABASE SETUP (SQLite)
+# ---------------------------------------------------------
+DB_NAME = "bets.db"
+
+def init_db():
+    """Creates the table if it doesn't exist"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_name TEXT,
+            selection TEXT,
+            market_type TEXT,
+            handicap REAL,
+            danske_odds REAL,
+            fair_odds REAL,
+            ev_percent REAL,
+            stake REAL,
+            status TEXT DEFAULT 'Pending', -- Pending, Won, Lost, Void
+            result_score TEXT,             -- e.g. "110-105"
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Run this on startup
+init_db()
+
+class BetRequest(BaseModel):
+    match_name: str
+    selection: str
+    market_type: str
+    handicap: Optional[float] = None
+    danske_odds: float
+    fair_odds: float
+    ev_percent: float
+    stake: float
+
+# ---------------------------------------------------------
+# 5. API ENDPOINT
 # ---------------------------------------------------------
 @app.get("/api/opportunities")
 def get_opportunities():
@@ -284,5 +329,44 @@ def get_opportunities():
         "count": len(opportunities),
         "data": opportunities
     }
+
+# ---------------------------------------------------------
+# BETTING ENDPOINTS
+# ---------------------------------------------------------
+
+@app.post("/api/place-bet")
+def place_bet(bet: BetRequest):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO bets (match_name, selection, market_type, handicap, danske_odds, fair_odds, ev_percent, stake)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            bet.match_name, 
+            bet.selection, 
+            bet.market_type, 
+            bet.handicap, 
+            bet.danske_odds, 
+            bet.fair_odds, 
+            bet.ev_percent, 
+            bet.stake
+        ))
+        conn.commit()
+        conn.close()
+        return {"message": "Bet placed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/my-bets")
+def get_my_bets():
+    conn = sqlite3.connect(DB_NAME)
+    # Return dictionary rows instead of tuples
+    conn.row_factory = sqlite3.Row 
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM bets ORDER BY timestamp DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return {"data": [dict(row) for row in rows]}
 
 # To run: uvicorn main:app --reload

@@ -27,6 +27,48 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Function to handle placing a bet
+  const handlePlaceBet = async (bet: Opportunity) => {
+    // 1. Simple prompt for now (We will make a nice Modal later)
+    const stakeStr = window.prompt(
+      `Placing bet on ${bet.selection}\nEV: ${bet.ev}%\n\nEnter Stake Amount ($):`,
+      "100"
+    );
+
+    if (!stakeStr) return; // User cancelled
+
+    const stake = parseFloat(stakeStr);
+    if (isNaN(stake)) return alert("Invalid stake amount");
+
+    // 2. Send to Backend
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/place-bet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          match_name: bet.match,
+          selection: bet.selection,
+          market_type: bet.type,
+          handicap: bet.line,
+          danske_odds: bet.danske_odds,
+          fair_odds: bet.fair_odds,
+          ev_percent: bet.ev,
+          stake: stake
+        }),
+      });
+
+      if (res.ok) {
+        alert("Bet Placed Successfully!");
+      } else {
+        alert("Error placing bet");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to connect to server");
+    }
+  };
+
+
   // 2. The Fetch Function
   const fetchData = async () => {
     setLoading(true);
@@ -126,7 +168,11 @@ export default function Home() {
                 )}
                 
                 {data.map((bet) => (
-                  <tr key={bet.id} className="hover:bg-gray-50 transition">
+                  <tr 
+                    key={bet.id} 
+                    onClick={() => handlePlaceBet(bet)} // <--- ADD CLICK HANDLER
+                    className="hover:bg-blue-50 transition cursor-pointer border-b last:border-0"
+                  >
                     <td className="px-6 py-4 font-medium">{bet.match}</td>
                     <td className="px-6 py-4">
                       {bet.selection}
