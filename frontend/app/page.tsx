@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import BetModal from "../components/BetModal";;
 
 // 1. Define the shape of our data (TypeScript Interface)
 // This matches the JSON coming from your Python API
@@ -21,50 +22,52 @@ interface ApiResponse {
   data: Opportunity[];
 }
 
+
 export default function Home() {
   const [data, setData] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
+  const [bankroll, setBankroll] = useState(1000); // Default $1000
 
-  // Function to handle placing a bet
-  const handlePlaceBet = async (bet: Opportunity) => {
-    // 1. Simple prompt for now (We will make a nice Modal later)
-    const stakeStr = window.prompt(
-      `Placing bet on ${bet.selection}\nEV: ${bet.ev}%\n\nEnter Stake Amount ($):`,
-      "100"
-    );
+  // 1. When row is clicked, open modal
+  const handleRowClick = (bet: Opportunity) => {
+    setSelectedBet(bet);
+  };
 
-    if (!stakeStr) return; // User cancelled
+  // 2. When "Place Bet" is clicked inside modal
+  const handleConfirmBet = async (stake: number) => {
+    if (!selectedBet) return;
 
-    const stake = parseFloat(stakeStr);
-    if (isNaN(stake)) return alert("Invalid stake amount");
-
-    // 2. Send to Backend
     try {
       const res = await fetch("http://127.0.0.1:8000/api/place-bet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          match_name: bet.match,
-          selection: bet.selection,
-          market_type: bet.type,
-          handicap: bet.line,
-          danske_odds: bet.danske_odds,
-          fair_odds: bet.fair_odds,
-          ev_percent: bet.ev,
+          match_name: selectedBet.match,
+          selection: selectedBet.selection,
+          market_type: selectedBet.type,
+          handicap: selectedBet.line,
+          danske_odds: selectedBet.danske_odds,
+          fair_odds: selectedBet.fair_odds,
+          ev_percent: selectedBet.ev,
           stake: stake
         }),
       });
 
       if (res.ok) {
-        alert("Bet Placed Successfully!");
+        // Close modal and maybe show a toast
+        setSelectedBet(null);
+        // Ideally, subtract from bankroll here locally for immediate feedback
+        setBankroll(prev => prev - stake); 
+        alert("Bet placed successfully!");
       } else {
         alert("Error placing bet");
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to connect to server");
+      alert("Failed to connect");
     }
   };
 
@@ -170,7 +173,7 @@ export default function Home() {
                 {data.map((bet) => (
                   <tr 
                     key={bet.id} 
-                    onClick={() => handlePlaceBet(bet)} // <--- ADD CLICK HANDLER
+                    onClick={() => handleRowClick(bet)} // <--- ADD CLICK HANDLER
                     className="hover:bg-blue-50 transition cursor-pointer border-b last:border-0"
                   >
                     <td className="px-6 py-4 font-medium">{bet.match}</td>
@@ -191,6 +194,17 @@ export default function Home() {
           </div>
         </div>
       </div>
+      <BetModal 
+        bet={selectedBet} 
+        isOpen={!!selectedBet} 
+        onClose={() => setSelectedBet(null)}
+        onConfirm={handleConfirmBet}
+        currentBankroll={bankroll}
+      />
+
+    {/* Optional: Bankroll Input in the Header */}
+    {/* You can add a small input in the header to adjust the $1000 default */}
+
     </main>
   );
 }

@@ -252,7 +252,7 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
 
             if ev_percent > -0.05: # Return anything better than -5% EV
                 results.append({
-                    "id": f"{d_event['home_team']}-{d_market['type']}-{d_selection}", # Unique key for React
+                    "id": f"{d_event['home_team']}-{d_market['type']}-{d_selection}-{d_line}", # Unique key for React
                     "match": f"{d_event['home_team']} vs {d_event['away_team']}",
                     "type": d_market['type'],
                     "selection": d_selection,
