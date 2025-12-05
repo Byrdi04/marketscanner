@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import BetModal from "../components/BetModal";;
+import Link from "next/link";
+import BetModal from "../components/BetModal";
 
-// 1. Define the shape of our data (TypeScript Interface)
-// This matches the JSON coming from your Python API
+// INTERFACES
 interface Opportunity {
   id: string;
   match: string;
@@ -16,30 +16,86 @@ interface Opportunity {
   ev: number;
 }
 
+interface PlacedBet {
+  match_name: string;
+  selection: string;
+  market_type: string;
+  handicap: number | null;
+}
+
 interface ApiResponse {
   timestamp: string;
+  quota_remaining: string;
   count: number;
   data: Opportunity[];
 }
 
-
 export default function Home() {
-  const [data, setData] = useState<Opportunity[]>([]);
+  // DATA STATE
+  const [scannerData, setScannerData] = useState<Opportunity[]>([]);
+  const [placedBets, setPlacedBets] = useState<PlacedBet[]>([]); // NEW: specific list for checking
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [quota, setQuota] = useState<string>("?");
+  
+  // UI STATE
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
-  const [bankroll, setBankroll] = useState(1000); // Default $1000
+  const [bankroll, setBankroll] = useState(1000);
+  const [minEv, setMinEv] = useState(2); // Default: Only show > 2% EV
+  const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
 
-  // 1. When row is clicked, open modal
-  const handleRowClick = (bet: Opportunity) => {
-    setSelectedBet(bet);
+  // 1. FETCH SCANNER DATA
+  const fetchScanner = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/opportunities");
+      const json: ApiResponse = await res.json();
+      setScannerData(json.data);
+      setQuota(json.quota_remaining);
+      setLastUpdated(new Date(json.timestamp).toLocaleTimeString());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // 2. When "Place Bet" is clicked inside modal
+  // 2. FETCH PLACED BETS (To check for duplicates)
+  const fetchPlacedBets = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/my-bets");
+      const json = await res.json();
+      setPlacedBets(json.data);
+    } catch (err) {
+      console.error("Error fetching placed bets");
+    }
+  };
+
+  // Load both on startup
+  useEffect(() => {
+    fetchScanner();
+    fetchPlacedBets();
+  }, []);
+
+  // 3. HELPER: CHECK IF BET IS PLACED
+  const isBetPlaced = (op: Opportunity) => {
+    return placedBets.some(pb => 
+      pb.match_name === op.match &&
+      pb.selection === op.selection &&
+      pb.market_type === op.type &&
+      // Handle loose float matching for lines
+      (pb.handicap === op.line || (pb.handicap === null && op.line === null))
+    );
+  };
+
+  // 4. HELPER: CHECK FOR MATCH EXPOSURE (Smart Strategy)
+  // Returns true if we have ANY bet on this match, even a different market
+  const hasMatchExposure = (op: Opportunity) => {
+    return placedBets.some(pb => pb.match_name === op.match);
+  };
+
   const handleConfirmBet = async (stake: number) => {
     if (!selectedBet) return;
-
     try {
       const res = await fetch("http://127.0.0.1:8000/api/place-bet", {
         method: "POST",
@@ -57,58 +113,29 @@ export default function Home() {
       });
 
       if (res.ok) {
-        // Close modal and maybe show a toast
         setSelectedBet(null);
-        // Ideally, subtract from bankroll here locally for immediate feedback
-        setBankroll(prev => prev - stake); 
-        alert("Bet placed successfully!");
-      } else {
-        alert("Error placing bet");
+        // Refresh placed bets so the UI updates instantly
+        fetchPlacedBets(); 
+        alert("Bet placed!");
       }
     } catch (err) {
-      console.error(err);
       alert("Failed to connect");
     }
   };
 
+  // 5. FILTER LOGIC
+  const filteredData = scannerData.filter(bet => {
+    // A. EV Filter
+    if (bet.ev < minEv) return false;
+    // B. Hide Placed Filter
+    if (hidePlaced && isBetPlaced(bet)) return false;
+    return true;
+  });
 
-  // 2. The Fetch Function
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Note: We point to port 8000 where FastAPI is running
-      const res = await fetch("http://127.0.0.1:8000/api/opportunities");
-      
-      if (!res.ok) {
-        throw new Error("Failed to fetch data from backend");
-      }
-
-      const json: ApiResponse = await res.json();
-      setData(json.data);
-      
-      // Format the timestamp nicely
-      const date = new Date(json.timestamp);
-      setLastUpdated(date.toLocaleTimeString());
-      
-    } catch (err) {
-      console.error(err);
-      setError("Error connecting to Python Backend. Is it running?");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch on initial load
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // 3. Helper for Color Coding EV
   const getEvColor = (ev: number) => {
-    if (ev >= 5) return "text-green-600 font-bold"; // Amazing
-    if (ev > 0) return "text-green-500";            // Good
-    return "text-gray-500";                         // Marginal
+    if (ev >= 5) return "text-green-600 font-bold";
+    if (ev > 0) return "text-green-500";
+    return "text-gray-500";
   };
 
   return (
@@ -116,36 +143,63 @@ export default function Home() {
       <div className="max-w-6xl mx-auto">
         
         {/* HEADER */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-between items-start mb-8">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Market Scanner</h1>
-            <p className="text-gray-500 mt-1">
-              Comparing Danske Spil vs Pinnacle
-            </p>
+            <div className="flex gap-4 mt-1 text-sm">
+              <p className="text-gray-500">Live EV Finder</p>
+              <Link href="/portfolio" className="text-blue-600 hover:underline font-medium">
+                View Portfolio →
+              </Link>
+            </div>
           </div>
           
           <div className="text-right">
             <button
-              onClick={fetchData}
+              onClick={fetchScanner}
               disabled={loading}
-              className="bg-black text-white px-4 py-2 rounded-md hover:bg-gray-800 disabled:opacity-50 transition"
+              className="bg-black text-white px-4 py-2 rounded-md hover:bg-gray-800 disabled:opacity-50 transition text-sm"
             >
               {loading ? "Scanning..." : "Refresh Data"}
             </button>
-            {lastUpdated && (
-              <p className="text-xs text-gray-400 mt-2">
-                Last fetched: {lastUpdated}
-              </p>
-            )}
+            <div className="mt-2 flex flex-col items-end text-xs text-gray-400">
+              <span>Updated: {lastUpdated || "-"}</span>
+              <span className="font-mono mt-1">API Credits: {quota}</span>
+            </div>
           </div>
         </div>
 
-        {/* ERROR STATE */}
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-            {error}
+        {/* FILTERS BAR */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 flex flex-wrap gap-6 items-center">
+          
+          {/* Min EV Slider */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Min EV: {minEv}%</label>
+            <input 
+              type="range" min="0" max="10" step="0.5"
+              value={minEv} onChange={(e) => setMinEv(parseFloat(e.target.value))}
+              className="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+            />
           </div>
-        )}
+
+          {/* Toggle Hide Placed */}
+          <div className="flex items-center gap-2">
+            <input 
+              type="checkbox" 
+              id="hidePlaced"
+              checked={hidePlaced}
+              onChange={(e) => setHidePlaced(e.target.checked)}
+              className="w-4 h-4 text-black rounded focus:ring-black"
+            />
+            <label htmlFor="hidePlaced" className="text-sm text-gray-700 cursor-pointer select-none">
+              Hide Already Placed
+            </label>
+          </div>
+
+          <div className="ml-auto text-xs text-gray-400">
+            Showing {filteredData.length} of {scannerData.length} opportunities
+          </div>
+        </div>
 
         {/* DATA TABLE */}
         <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
@@ -156,44 +210,66 @@ export default function Home() {
                   <th className="px-6 py-3">Match</th>
                   <th className="px-6 py-3">Selection</th>
                   <th className="px-6 py-3">Market</th>
-                  <th className="px-6 py-3 text-right">Danske Odds</th>
-                  <th className="px-6 py-3 text-right">Fair Odds</th>
-                  <th className="px-6 py-3 text-right">EV (%)</th>
+                  <th className="px-6 py-3 text-right">Danske</th>
+                  <th className="px-6 py-3 text-right">Fair</th>
+                  <th className="px-6 py-3 text-right">EV</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {data.length === 0 && !loading && (
+                {filteredData.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                      No opportunities found (or waiting for data...)
+                      No bets match your filters.
                     </td>
                   </tr>
                 )}
                 
-                {data.map((bet) => (
-                  <tr 
-                    key={bet.id} 
-                    onClick={() => handleRowClick(bet)} // <--- ADD CLICK HANDLER
-                    className="hover:bg-blue-50 transition cursor-pointer border-b last:border-0"
-                  >
-                    <td className="px-6 py-4 font-medium">{bet.match}</td>
-                    <td className="px-6 py-4">
-                      {bet.selection}
-                      {bet.line && <span className="ml-2 text-gray-400 text-xs">({bet.line})</span>}
-                    </td>
-                    <td className="px-6 py-4 text-gray-500">{bet.type}</td>
-                    <td className="px-6 py-4 text-right font-mono">{bet.danske_odds.toFixed(2)}</td>
-                    <td className="px-6 py-4 text-right text-gray-400 font-mono">{bet.fair_odds.toFixed(2)}</td>
-                    <td className={`px-6 py-4 text-right font-mono ${getEvColor(bet.ev)}`}>
-                      {bet.ev > 0 ? "+" : ""}{bet.ev}%
-                    </td>
-                  </tr>
-                ))}
+                {filteredData.map((bet) => {
+                  const placed = isBetPlaced(bet);
+                  const exposure = !placed && hasMatchExposure(bet); // Only show exposure warning if not already placed
+
+                  return (
+                    <tr 
+                      key={bet.id} 
+                      onClick={() => !placed && setSelectedBet(bet)}
+                      className={`
+                        transition border-b last:border-0
+                        ${placed ? "bg-gray-50 opacity-60 cursor-not-allowed" : "hover:bg-blue-50 cursor-pointer"}
+                      `}
+                    >
+                      <td className="px-6 py-4 font-medium">
+                        {bet.match}
+                        {/* Exposure Warning Badge */}
+                        {exposure && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700 border border-orange-200" title="You already have a bet on this match">
+                            ⚠ Exposure
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {bet.selection}
+                        {bet.line && <span className="ml-2 text-gray-400 text-xs">({bet.line})</span>}
+                        {placed && (
+                          <span className="ml-2 text-xs font-bold text-green-600 border border-green-200 bg-green-50 px-1 rounded">
+                            ✓ Placed
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-gray-500">{bet.type}</td>
+                      <td className="px-6 py-4 text-right font-mono">{bet.danske_odds.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right text-gray-400 font-mono">{bet.fair_odds.toFixed(2)}</td>
+                      <td className={`px-6 py-4 text-right font-mono ${getEvColor(bet.ev)}`}>
+                        +{bet.ev}%
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+
       <BetModal 
         bet={selectedBet} 
         isOpen={!!selectedBet} 
@@ -201,10 +277,6 @@ export default function Home() {
         onConfirm={handleConfirmBet}
         currentBankroll={bankroll}
       />
-
-    {/* Optional: Bankroll Input in the Header */}
-    {/* You can add a small input in the header to adjust the $1000 default */}
-
     </main>
   );
 }

@@ -35,6 +35,12 @@ pinnacle_cache = {
     "data": []
 }
 
+# Global variable to store the latest quota info
+latest_quota = {
+    "remaining": "Unknown",
+    "used": "Unknown"
+}
+
 # ---------------------------------------------------------
 # 1. DATA FETCHING: DANSKE SPIL (Free - No Cache Needed)
 # ---------------------------------------------------------
@@ -128,13 +134,14 @@ def extract_decimal(price_data):
 # 2. DATA FETCHING: PINNACLE (Quota Management)
 # ---------------------------------------------------------
 def fetch_pinnacle_cached():
-    global pinnacle_cache
+    global pinnacle_cache, latest_quota
     current_time = time.time()
 
-    # CHECK CACHE: If data is fresh (less than 10 mins old), use it.
+    # Return cache if fresh
     if pinnacle_cache["data"] and (current_time - pinnacle_cache["last_updated"] < CACHE_DURATION):
-        print("Returning Cached Pinnacle Data (Saving Quota)")
+        print("Returning Cached Pinnacle Data")
         return pinnacle_cache["data"]
+
 
     print("Fetching New Pinnacle Data (Using Quota)...")
     
@@ -152,6 +159,11 @@ def fetch_pinnacle_cached():
 
     try:
         response = requests.get(url, params=params)
+        
+        # --- CAPTURE HEADERS ---
+        latest_quota["remaining"] = response.headers.get('x-requests-remaining', 'Unknown')
+        latest_quota["used"] = response.headers.get('x-requests-used', 'Unknown')
+
         response.raise_for_status()
         
         # Parse immediately before caching
@@ -181,6 +193,60 @@ def parse_pinnacle_data(api_response):
         }
         clean_data.append(clean_event)
     return clean_data
+
+def update_clv_for_placed_bets(pinnacle_events):
+    """
+    Loops through pending bets in DB. If the game is found in the fresh
+    Pinnacle data, update the 'closing_odds' with the current Pinnacle price.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Get all pending bets
+    cursor.execute("SELECT * FROM bets WHERE status = 'Pending'")
+    pending_bets = cursor.fetchall()
+    
+    updates_made = 0
+    pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
+
+    for bet in pending_bets:
+        # 1. Find the matching Pinnacle Event
+        match_name, score = process.extractOne(bet['match_name'].split(" vs ")[0], pinnacle_home_teams)
+        if score < 85: continue
+
+        p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
+        
+        # 2. Find the specific market and selection
+        # Map our stored types back to API keys
+        p_market_key = {'MoneyLine': 'h2h', 'Spread': 'spreads', 'Total': 'totals'}.get(bet['market_type'])
+        if not p_market_key or not p_event.get('markets'): continue
+        
+        p_target_market = next((m for m in p_event['markets'] if m['key'] == p_market_key), None)
+        if not p_target_market: continue
+        
+        # 3. Calculate Fair Odds (The "CLV")
+        fair_probs = calculate_fair_probability(p_target_market['outcomes'])
+        
+        # Fuzzy match the selection name (e.g. "Lakers")
+        p_selection, sel_score = process.extractOne(bet['selection'], list(fair_probs.keys()))
+        if sel_score < 85: continue
+
+        # 4. Update Database
+        current_fair_prob = fair_probs[p_selection]
+        current_fair_odds = round(1 / current_fair_prob, 2)
+        
+        cursor.execute(
+            "UPDATE bets SET closing_odds = ? WHERE id = ?", 
+            (current_fair_odds, bet['id'])
+        )
+        updates_made += 1
+
+    if updates_made > 0:
+        print(f"Updated CLV for {updates_made} pending bets.")
+        conn.commit()
+    
+    conn.close()
 
 # ---------------------------------------------------------
 # 3. ANALYSIS LOGIC
@@ -271,7 +337,6 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
 DB_NAME = "bets.db"
 
 def init_db():
-    """Creates the table if it doesn't exist"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -285,8 +350,9 @@ def init_db():
             fair_odds REAL,
             ev_percent REAL,
             stake REAL,
-            status TEXT DEFAULT 'Pending', -- Pending, Won, Lost, Void
-            result_score TEXT,             -- e.g. "110-105"
+            status TEXT DEFAULT 'Pending',
+            result_score TEXT,
+            closing_odds REAL,  -- NEW: To track CLV
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -322,10 +388,14 @@ def get_opportunities():
     if not danske_data or not pinnacle_data:
         return {"message": "Could not fetch data from one or both sources", "data": []}
 
+    # This updates the DB with fresh Pinnacle odds for any pending bets
+    update_clv_for_placed_bets(pinnacle_data)
+
     opportunities = run_analysis(danske_data, pinnacle_data)
     
     return {
         "timestamp": datetime.now().isoformat(),
+        "quota_remaining": latest_quota["remaining"], # SEND QUOTA TO FRONTEND
         "count": len(opportunities),
         "data": opportunities
     }
@@ -369,4 +439,144 @@ def get_my_bets():
     conn.close()
     return {"data": [dict(row) for row in rows]}
 
+@app.post("/api/settle-bets")
+def settle_bets():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # 1. Get Pending Bets
+    cursor.execute("SELECT * FROM bets WHERE status = 'Pending'")
+    pending_bets = cursor.fetchall()
+    
+    if not pending_bets:
+        conn.close()
+        return {"message": "No pending bets to settle"}
+
+    # 2. Get Scores (Once for all bets)
+    scores_data = fetch_nba_scores()
+    if not scores_data:
+        conn.close()
+        return {"message": "Could not fetch scores from API"}
+
+    updated_count = 0
+    
+    # 3. Loop and Grade
+    for bet in pending_bets:
+        new_status, result_str = grade_bet(dict(bet), scores_data)
+        
+        if new_status and new_status != 'Pending':
+            cursor.execute(
+                "UPDATE bets SET status = ?, result_score = ? WHERE id = ?",
+                (new_status, result_str, bet['id'])
+            )
+            updated_count += 1
+            print(f"Settled Bet {bet['id']}: {new_status}")
+
+    conn.commit()
+    conn.close()
+    
+    return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
+
+# ---------------------------------------------------------
+# 5. SETTLEMENT LOGIC
+# ---------------------------------------------------------
+def fetch_nba_scores():
+    """Fetches scores for the last 3 days from The Odds API"""
+    # Note: 'daysFrom' allows us to look back at completed games
+    url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/scores'
+    params = {
+        'apiKey': API_KEY,
+        'daysFrom': 3, # Look back 3 days
+        'dateFormat': 'iso'
+    }
+    try:
+        resp = requests.get(url, params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"Error fetching scores: {e}")
+        return []
+
+def grade_bet(bet_row, scores_data):
+    """
+    Returns: (New Status, Score String) or (None, None) if game not found/finished
+    """
+    bet_match_name = bet_row['match_name'] # e.g. "Houston Rockets vs Phoenix Suns"
+    
+    # 1. PREPARE API DATA FOR MATCHING
+    # We construct strings "Home vs Away" for every game in the API response
+    # so we can compare apples to apples.
+    api_games_map = {}
+    for g in scores_data:
+        title = f"{g['home_team']} vs {g['away_team']}"
+        api_games_map[title] = g
+
+    # 2. FUZZY MATCH THE FULL TITLE
+    # This ensures "Rockets vs Suns" doesn't match "Rockets vs Kings"
+    potential_matches = list(api_games_map.keys())
+    best_match_title, score = process.extractOne(bet_match_name, potential_matches)
+    
+    # Use a strict threshold (90) because we expect the names to be very similar
+    # since both data sources ultimately come from The Odds API context.
+    if score < 90: 
+        return None, None 
+
+    game = api_games_map[best_match_title]
+    
+    if not game['completed']: return None, None # Game exists but isn't over
+
+    # 3. EXTRACT SCORES
+    home_score = 0
+    away_score = 0
+    
+    # Some API providers return scores as a list, others as null if cancelled
+    if not game.get('scores'): return None, None
+
+    for s in game['scores']:
+        if s['name'] == game['home_team']: home_score = int(s['score'])
+        elif s['name'] == game['away_team']: away_score = int(s['score'])
+
+    result_str = f"{game['home_team']} {home_score} - {away_score} {game['away_team']}"
+
+    # 4. GRADE THE BET
+    selection = bet_row['selection']
+    market = bet_row['market_type']
+    handicap = bet_row['handicap'] or 0.0
+    
+    status = "Pending"
+
+    # --- LOGIC ---
+    
+    # A. MONEYLINE
+    if market == 'MoneyLine':
+        if selection == game['home_team']:
+            status = "Won" if home_score > away_score else "Lost"
+        else:
+            status = "Won" if away_score > home_score else "Lost"
+
+    # B. SPREAD
+    elif market == 'Spread':
+        # Logic: If selection is Home, we want (HomeScore + Handicap) > AwayScore
+        sel_score = home_score if selection == game['home_team'] else away_score
+        opp_score = away_score if selection == game['home_team'] else home_score
+        
+        final_score_adjusted = sel_score + handicap
+        
+        if final_score_adjusted > opp_score: status = "Won"
+        elif final_score_adjusted < opp_score: status = "Lost"
+        else: status = "Void" # Push
+
+    # C. TOTALS
+    elif market == 'Total':
+        total_points = home_score + away_score
+        if "Over" in selection:
+            status = "Won" if total_points > handicap else "Lost"
+        elif "Under" in selection:
+            status = "Won" if total_points < handicap else "Lost"
+        
+        if total_points == handicap: status = "Void"
+
+    return status, result_str
+    
 # To run: uvicorn main:app --reload
