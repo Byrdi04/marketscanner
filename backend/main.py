@@ -133,17 +133,23 @@ def extract_decimal(price_data):
 # ---------------------------------------------------------
 # 2. DATA FETCHING: PINNACLE (Quota Management)
 # ---------------------------------------------------------
-def fetch_pinnacle_cached():
+def fetch_pinnacle_cached(require_fresh=True):
     global pinnacle_cache, latest_quota
     current_time = time.time()
 
-    # Return cache if fresh
-    if pinnacle_cache["data"] and (current_time - pinnacle_cache["last_updated"] < CACHE_DURATION):
-        print("Returning Cached Pinnacle Data")
+    # 1. If we DON'T require fresh data, just return what we have
+    # (unless it's completely empty, then we must fetch)
+    if not require_fresh and pinnacle_cache["data"]:
+        print("Returning Stale/Cached Data (User requested no refresh)")
         return pinnacle_cache["data"]
 
+    # 2. Standard Logic: Check Timer
+    if pinnacle_cache["data"] and (current_time - pinnacle_cache["last_updated"] < CACHE_DURATION):
+        print("Returning Cached Pinnacle Data (Timer valid)")
+        return pinnacle_cache["data"]
 
     print("Fetching New Pinnacle Data (Using Quota)...")
+
     
     SPORT_KEY = 'basketball_nba'
     BOOKMAKERS = 'pinnacle'
@@ -320,6 +326,7 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
                 results.append({
                     "id": f"{d_event['home_team']}-{d_market['type']}-{d_selection}-{d_line}", # Unique key for React
                     "match": f"{d_event['home_team']} vs {d_event['away_team']}",
+                    "commence_time": d_event['commence_time'],
                     "type": d_market['type'],
                     "selection": d_selection,
                     "line": d_line,
@@ -376,26 +383,33 @@ class BetRequest(BaseModel):
 # 5. API ENDPOINT
 # ---------------------------------------------------------
 @app.get("/api/opportunities")
-def get_opportunities():
+def get_opportunities(refresh: bool = False):
     if not API_KEY:
         raise HTTPException(status_code=500, detail="API_KEY not set in .env file")
 
     # 1. Get Data
     danske_data = fetch_danske_spil()
-    pinnacle_data = fetch_pinnacle_cached()
+    # If refresh=True, we ask for fresh data (checks timer).
+    # If refresh=False, we accept whatever is in memory.
+    pinnacle_data = fetch_pinnacle_cached(require_fresh=refresh)
     
-    # 2. Run Analysis
-    if not danske_data or not pinnacle_data:
-        return {"message": "Could not fetch data from one or both sources", "data": []}
+    if not danske_data: # If Danske fails, we can't do anything
+        return {"message": "Error fetching Danske Spil", "data": []}
+    
+    # If we have no Pinnacle data at all (first run), we might return empty
+    if not pinnacle_data:
+        # Optional: Force fetch if it's the very first run ever
+        pinnacle_data = fetch_pinnacle_cached(require_fresh=True)
 
-    # This updates the DB with fresh Pinnacle odds for any pending bets
+    # ... piggyback update ...
     update_clv_for_placed_bets(pinnacle_data)
 
     opportunities = run_analysis(danske_data, pinnacle_data)
     
     return {
         "timestamp": datetime.now().isoformat(),
-        "quota_remaining": latest_quota["remaining"], # SEND QUOTA TO FRONTEND
+        "pinnacle_age": pinnacle_cache["last_updated"],
+        "quota_remaining": latest_quota["remaining"],
         "count": len(opportunities),
         "data": opportunities
     }
@@ -578,5 +592,5 @@ def grade_bet(bet_row, scores_data):
         if total_points == handicap: status = "Void"
 
     return status, result_str
-    
+
 # To run: uvicorn main:app --reload

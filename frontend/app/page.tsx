@@ -14,6 +14,7 @@ interface Opportunity {
   danske_odds: number;
   fair_odds: number;
   ev: number;
+  commence_time: string;
 }
 
 interface PlacedBet {
@@ -25,6 +26,7 @@ interface PlacedBet {
 
 interface ApiResponse {
   timestamp: string;
+  pinnacle_age: number;
   quota_remaining: string;
   count: number;
   data: Opportunity[];
@@ -37,6 +39,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [quota, setQuota] = useState<string>("?");
+  const [dataAge, setDataAge] = useState<number>(0); // Unix timestamp from backend
   
   // UI STATE
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
@@ -45,14 +48,18 @@ export default function Home() {
   const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
 
   // 1. FETCH SCANNER DATA
-  const fetchScanner = async () => {
+  const fetchScanner = async (isManualRefresh = true) => {
     setLoading(true);
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/opportunities");
+      // Pass the parameter to the backend
+      // If isManualRefresh is true, ?refresh=true. Else ?refresh=false
+      const res = await fetch(`http://127.0.0.1:8000/api/opportunities?refresh=${isManualRefresh}`);
+      
       const json: ApiResponse = await res.json();
       setScannerData(json.data);
-      setQuota(json.quota_remaining);
       setLastUpdated(new Date(json.timestamp).toLocaleTimeString());
+      setDataAge(json.pinnacle_age);
+      setQuota(json.quota_remaining);
     } catch (err) {
       console.error(err);
     } finally {
@@ -73,7 +80,7 @@ export default function Home() {
 
   // Load both on startup
   useEffect(() => {
-    fetchScanner();
+    fetchScanner(false); // <--- FALSE: Load stale data if available
     fetchPlacedBets();
   }, []);
 
@@ -123,6 +130,32 @@ export default function Home() {
     }
   };
 
+    // Helper: Calculate minutes since Pinnacle update
+  const getStalenessInfo = () => {
+    if (dataAge === 0) return { color: "bg-gray-400", text: "Unknown" };
+    
+    const now = Math.floor(Date.now() / 1000);
+    const diffMinutes = Math.floor((now - dataAge) / 60);
+    
+    if (diffMinutes < 5) return { color: "bg-green-500", text: "Fresh (< 5m)" };
+    if (diffMinutes < 15) return { color: "bg-yellow-500", text: `Aging (${diffMinutes}m)` };
+    return { color: "bg-red-500", text: `Stale (${diffMinutes}m)` };
+  };
+
+  // Helper: Format start time
+  const formatStartTime = (isoString: string) => {
+    const start = new Date(isoString);
+    const now = new Date();
+    const diffMs = start.getTime() - now.getTime();
+    const diffHrs = diffMs / (1000 * 60 * 60);
+    
+    // If started or starting in 10 mins
+    if (diffHrs < 0) return <span className="text-red-600 font-bold">Live / Started</span>;
+    if (diffHrs < 1) return <span className="text-orange-600 font-bold">In {Math.floor(diffHrs * 60)}m</span>;
+    if (diffHrs < 24) return <span className="text-gray-700">In {Math.floor(diffHrs)}h</span>;
+    return <span className="text-gray-400">{start.toLocaleDateString()}</span>;
+  };
+
   // 5. FILTER LOGIC
   const filteredData = scannerData.filter(bet => {
     // A. EV Filter
@@ -156,15 +189,22 @@ export default function Home() {
           
           <div className="text-right">
             <button
-              onClick={fetchScanner}
+              onClick={() => fetchScanner(true)}
               disabled={loading}
-              className="bg-black text-white px-4 py-2 rounded-md hover:bg-gray-800 disabled:opacity-50 transition text-sm"
+              className="..."
             >
               {loading ? "Scanning..." : "Refresh Data"}
             </button>
             <div className="mt-2 flex flex-col items-end text-xs text-gray-400">
               <span>Updated: {lastUpdated || "-"}</span>
               <span className="font-mono mt-1">API Credits: {quota}</span>
+
+              {/* STALENESS INDICATOR */}
+              <div className="flex items-center gap-2">
+                <span>Pinnacle Data:</span>
+                <span className={`w-2 h-2 rounded-full ${getStalenessInfo().color}`}></span>
+                <span className="font-medium">{getStalenessInfo().text}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -208,6 +248,7 @@ export default function Home() {
               <thead className="bg-gray-100 text-gray-600 font-medium border-b">
                 <tr>
                   <th className="px-6 py-3">Match</th>
+                  <th className="px-6 py-3">Start</th>
                   <th className="px-6 py-3">Selection</th>
                   <th className="px-6 py-3">Market</th>
                   <th className="px-6 py-3 text-right">Danske</th>
@@ -245,6 +286,9 @@ export default function Home() {
                             ⚠ Exposure
                           </span>
                         )}
+                      </td>
+                      <td className="px-6 py-4 text-sm whitespace-nowrap">
+                        {formatStartTime(bet.commence_time)}
                       </td>
                       <td className="px-6 py-4">
                         {bet.selection}
