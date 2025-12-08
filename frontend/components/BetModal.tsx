@@ -3,39 +3,43 @@
 import { useState, useEffect } from "react";
 
 interface BetModalProps {
-  bet: any; 
+  bet: any;
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (stake: number) => void;
   currentBankroll: number;
 }
 
+// HELPER: Round to "Human" numbers to avoid bot detection
+const getSmartRoundedStake = (rawStake: number) => {
+  if (rawStake <= 0) return 0;
+  if (rawStake < 20) return Math.round(rawStake / 5) * 5; // Keep small bets precise-ish ($12)
+  if (rawStake < 100) return Math.round(rawStake / 10) * 10; // Round to nearest 10 ($43 -> $45)
+  if (rawStake < 500) return Math.round(rawStake / 25) * 25; // Round to nearest 10 ($143 -> $140)
+  return Math.round(rawStake / 50) * 50; // Big bets round to $50 ($530 -> $550)
+};
+
 export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankroll }: BetModalProps) {
-  // 1. HOOKS ALWAYS COME FIRST (Before any return statements)
   const [stake, setStake] = useState<string>("");
   const [fraction, setFraction] = useState<number>(0.5); 
 
-  // 2. SAFE CALCULATIONS
-  // We use ternary operators (? :) to ensure this math runs without crashing 
-  // even if 'bet' is temporarily null (before the component decides not to render).
+  // SAFE CALCULATIONS
   const b = bet ? bet.danske_odds - 1 : 0;
   const evDecimal = bet ? bet.ev / 100 : 0;
-  
-  // Avoid division by zero
   const fullKellyPercent = b > 0 ? evDecimal / b : 0;
   
   const adjustedKellyPercent = fullKellyPercent * fraction;
-  const suggestedStake = Math.round(currentBankroll * adjustedKellyPercent);
+  const rawStake = currentBankroll * adjustedKellyPercent;
+  const suggestedStake = getSmartRoundedStake(rawStake);
 
-  // 3. EFFECT (Now it's safe because it's not behind a return)
+  const isHighEv = bet && bet.ev > 15; // Flag bets with >15% EV as suspicious
+
   useEffect(() => {
     if (isOpen && bet && suggestedStake > 0) {
       setStake(suggestedStake.toString());
     }
   }, [bet, fraction, currentBankroll, isOpen, suggestedStake]);
 
-  // 4. CONDITIONAL RETURN (The Gatekeeper)
-  // Now we can safely decide not to render anything
   if (!isOpen || !bet) return null;
 
   return (
@@ -46,10 +50,31 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">{bet.selection}</h2>
-            <p className="text-sm text-gray-500">{bet.match}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <a 
+                href={`https://danskespil.dk/oddset/sports/event/${bet.event_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded hover:bg-gray-200 transition"
+              >
+                Open Game ↗
+              </a>
+            </div>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
         </div>
+
+        {/* HIGH EV WARNING (Palpable Error Check) */}
+        {isHighEv && (
+          <div className="mb-4 bg-red-50 border border-red-200 p-3 rounded-md text-sm text-red-700">
+            <strong>⚠️ Danger: High EV Detected ({bet.ev}%)</strong>
+            <p className="mt-1 text-xs">
+              This might be a "Palpable Error" (pricing mistake). 
+              Bookmakers often void these bets and flag accounts that take them.
+              Proceed with extreme caution.
+            </p>
+          </div>
+        )}
 
         {/* STATS GRID */}
         <div className="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-md border border-gray-100">
@@ -59,7 +84,9 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase">Value (EV)</p>
-            <p className="text-lg font-mono font-bold text-green-600">+{bet.ev}%</p>
+            <p className={`text-lg font-mono font-bold ${isHighEv ? "text-red-600" : "text-green-600"}`}>
+              +{bet.ev}%
+            </p>
           </div>
         </div>
 
@@ -72,7 +99,6 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
             </span>
           </div>
           
-          {/* Slider for Kelly Fraction */}
           <input 
             type="range" 
             min="0.1" max="1" step="0.1" 
@@ -93,9 +119,10 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
               className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:border-transparent outline-none font-mono"
             />
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Suggestion: <span className="font-bold">${suggestedStake}</span> based on bankroll of ${currentBankroll}
-          </p>
+          <div className="flex justify-between mt-2 text-xs text-gray-500">
+            <p>Raw Kelly: ${rawStake.toFixed(2)}</p>
+            <p className="font-medium text-black">Rounded: ${suggestedStake}</p>
+          </div>
         </div>
 
         {/* ACTIONS */}

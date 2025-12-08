@@ -86,6 +86,7 @@ def parse_danske_spil(json_response):
             elif t['side'] == 'AWAY': away_team_name = t['name']
 
         clean_event = {
+            "id": event['id'],
             "home_team": home_team_name,
             "away_team": away_team_name,
             "commence_time": event.get('startTime'),
@@ -153,7 +154,8 @@ def fetch_pinnacle_cached(require_fresh=True):
     
     SPORT_KEY = 'basketball_nba'
     BOOKMAKERS = 'pinnacle'
-    MARKETS = 'h2h,spreads,totals' 
+    #MARKETS = 'h2h,spreads,totals' 
+    MARKETS = 'spreads' 
     
     url = f'https://api.the-odds-api.com/v4/sports/{SPORT_KEY}/odds'
     params = {
@@ -325,6 +327,7 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
             if ev_percent > -0.05: # Return anything better than -5% EV
                 results.append({
                     "id": f"{d_event['home_team']}-{d_market['type']}-{d_selection}-{d_line}", # Unique key for React
+                    "event_id": d_event['id'],
                     "match": f"{d_event['home_team']} vs {d_event['away_team']}",
                     "commence_time": d_event['commence_time'],
                     "type": d_market['type'],
