@@ -7,6 +7,7 @@ import BetModal from "../components/BetModal";
 // INTERFACES
 interface Opportunity {
   id: string;
+  event_id: number;
   match: string;
   type: string;
   selection: string;
@@ -44,7 +45,7 @@ export default function Home() {
   // UI STATE
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
   const [bankroll, setBankroll] = useState(1000);
-  const [minEv, setMinEv] = useState(2); // Default: Only show > 2% EV
+  const [minEv, setMinEv] = useState(3.5); // Default: Only show > 2% EV
   const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
 
   // 1. FETCH SCANNER DATA
@@ -214,10 +215,16 @@ export default function Home() {
           
           {/* Min EV Slider */}
           <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700">Min EV: {minEv}%</label>
+            <label className="text-sm font-medium text-gray-700 min-w-[100px]">
+              {minEv <= -5 ? "Filter: Off" : `Min EV: ${minEv}%`}
+            </label>
             <input 
-              type="range" min="0" max="10" step="0.5"
-              value={minEv} onChange={(e) => setMinEv(parseFloat(e.target.value))}
+              type="range" 
+              min="-10"     // Allow dragging below 0
+              max="10" 
+              step="0.5"
+              value={minEv} 
+              onChange={(e) => setMinEv(parseFloat(e.target.value))}
               className="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
             />
           </div>
