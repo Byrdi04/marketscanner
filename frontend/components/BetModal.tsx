@@ -128,7 +128,7 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
           <div>
             <p className="text-xs text-gray-500 uppercase">Value (EV)</p>
             <p className={`text-lg font-mono font-bold ${isHighEv ? "text-red-600" : "text-green-600"}`}>
-              +{bet.ev}%
+              {bet.ev > 0 ? "+" : ""}{bet.ev}%
             </p>
           </div>
         </div>

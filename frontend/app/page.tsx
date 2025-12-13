@@ -33,6 +33,9 @@ interface ApiResponse {
   data: Opportunity[];
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+
 export default function Home() {
   // DATA STATE
   const [scannerData, setScannerData] = useState<Opportunity[]>([]);
@@ -54,7 +57,7 @@ export default function Home() {
     try {
       // Pass the parameter to the backend
       // If isManualRefresh is true, ?refresh=true. Else ?refresh=false
-      const res = await fetch(`http://127.0.0.1:8000/api/opportunities?refresh=${isManualRefresh}`);
+      const res = await fetch(`${API_BASE}/api/opportunities?refresh=${isManualRefresh}`);
       
       const json: ApiResponse = await res.json();
       setScannerData(json.data);
@@ -71,7 +74,7 @@ export default function Home() {
   // 2. FETCH PLACED BETS (To check for duplicates)
   const fetchPlacedBets = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/my-bets");
+      const res = await fetch(`${API_BASE}/api/my-bets`);
       const json = await res.json();
       setPlacedBets(json.data);
     } catch (err) {
@@ -105,7 +108,7 @@ export default function Home() {
   const handleConfirmBet = async (stake: number) => {
     if (!selectedBet) return;
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/place-bet", {
+      const res = await fetch(`${API_BASE}/api/place-bet`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -310,7 +313,7 @@ export default function Home() {
                       <td className="px-6 py-4 text-right font-mono">{bet.danske_odds.toFixed(2)}</td>
                       <td className="px-6 py-4 text-right text-gray-400 font-mono">{bet.fair_odds.toFixed(2)}</td>
                       <td className={`px-6 py-4 text-right font-mono ${getEvColor(bet.ev)}`}>
-                        +{bet.ev}%
+                        {bet.ev > 0 ? "+" : ""}{bet.ev}%
                       </td>
                     </tr>
                   );
