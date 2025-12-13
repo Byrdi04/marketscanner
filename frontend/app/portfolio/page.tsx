@@ -17,14 +17,12 @@ interface Bet {
   closing_odds: number | null;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-
 export default function Portfolio() {
   const [bets, setBets] = useState<Bet[]>([]);
   const [loading, setLoading] = useState(false);
 
   const fetchBets = async () => {
-    const res = await fetch(`${API_BASE}/api/my-bets`);
+    const res = await fetch(`/api/my-bets`);
     const json = await res.json();
     setBets(json.data);
   };
@@ -32,7 +30,7 @@ export default function Portfolio() {
   const handleSettle = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/settle-bets`, { method: "POST" });
+      const res = await fetch(`/api/settle-bets`, { method: "POST" });
       const data = await res.json();
       alert(data.message);
       fetchBets(); // Refresh list
