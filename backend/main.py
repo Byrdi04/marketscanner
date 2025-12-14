@@ -496,6 +496,88 @@ def settle_bets():
     return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
 
 # ---------------------------------------------------------
+# ANALYTICS ENDPOINT
+# ---------------------------------------------------------
+@app.get("/api/analytics")
+def get_analytics():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Get only SETTLED bets (ignore Pending)
+    cursor.execute("SELECT * FROM bets WHERE status IN ('Won', 'Lost', 'Void') ORDER BY timestamp ASC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"stats": None, "chart_data": []}
+
+    # Initialize Metrics
+    total_bets = 0
+    total_stake = 0
+    total_profit = 0
+    wins = 0
+    
+    # CLV Tracking
+    clv_sum = 0
+    clv_count = 0
+
+    # Chart Data (Running Total)
+    chart_data = []
+    running_profit = 0
+
+    for row in rows:
+        bet = dict(row)
+        total_bets += 1
+        total_stake += bet['stake']
+        
+        # Calculate Profit for this specific bet
+        bet_profit = 0
+        if bet['status'] == 'Won':
+            bet_profit = (bet['stake'] * bet['danske_odds']) - bet['stake']
+            wins += 1
+        elif bet['status'] == 'Lost':
+            bet_profit = -bet['stake']
+        elif bet['status'] == 'Void':
+            bet_profit = 0
+
+        total_profit += bet_profit
+        running_profit += bet_profit
+        
+        # Calculate CLV (if available)
+        # Formula: (Taken Odds / Closing Odds) - 1
+        if bet['closing_odds'] and bet['closing_odds'] > 0:
+            clv_val = (bet['danske_odds'] / bet['closing_odds']) - 1
+            clv_sum += clv_val
+            clv_count += 1
+
+        # Add point to chart
+        # We use a short date format for the X-axis
+        date_str = bet['timestamp'].split(' ')[0] # YYYY-MM-DD
+        chart_data.append({
+            "id": bet['id'],
+            "date": date_str,
+            "match": bet['match_name'],
+            "profit": round(running_profit, 2)
+        })
+
+    # Final Calculations
+    roi = (total_profit / total_stake * 100) if total_stake > 0 else 0
+    win_rate = (wins / total_bets * 100) if total_bets > 0 else 0
+    avg_clv = (clv_sum / clv_count * 100) if clv_count > 0 else 0
+
+    return {
+        "stats": {
+            "total_bets": total_bets,
+            "total_profit": round(total_profit, 2),
+            "roi": round(roi, 2),
+            "win_rate": round(win_rate, 1),
+            "avg_clv": round(avg_clv, 2)
+        },
+        "chart_data": chart_data
+    }
+
+# ---------------------------------------------------------
 # 5. SETTLEMENT LOGIC
 # ---------------------------------------------------------
 def fetch_nba_scores():

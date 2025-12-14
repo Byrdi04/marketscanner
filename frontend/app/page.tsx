@@ -185,6 +185,10 @@ export default function Home() {
               <Link href="/portfolio" className="text-blue-600 hover:underline font-medium">
                 View Portfolio →
               </Link>
+                <span className="text-gray-300">|</span>
+                <Link href="/analytics" className="text-blue-600 hover:underline font-medium">
+                  Analytics 📊
+                </Link>
             </div>
           </div>
           
