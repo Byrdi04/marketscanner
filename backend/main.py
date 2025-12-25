@@ -375,7 +375,8 @@ def init_db():
             status TEXT DEFAULT 'Pending',
             result_score TEXT,
             closing_odds REAL,  -- NEW: To track CLV
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            game_starts_at TEXT
         )
     ''')
     conn.commit()
@@ -393,6 +394,7 @@ class BetRequest(BaseModel):
     fair_odds: float
     ev_percent: float
     stake: float
+    commence_time: str
 
 # ---------------------------------------------------------
 # 5. API ENDPOINT
@@ -449,7 +451,8 @@ def place_bet(bet: BetRequest):
             bet.danske_odds, 
             bet.fair_odds, 
             bet.ev_percent, 
-            bet.stake
+            bet.stake,
+            bet.commence_time
         ))
         conn.commit()
         conn.close()

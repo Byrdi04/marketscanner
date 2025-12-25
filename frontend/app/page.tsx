@@ -116,7 +116,8 @@ export default function Home() {
           danske_odds: selectedBet.danske_odds,
           fair_odds: selectedBet.fair_odds,
           ev_percent: selectedBet.ev,
-          stake: stake
+          stake: stake,
+          commence_time: selectedBet.commence_time
         }),
       });
 
