@@ -51,12 +51,24 @@ def fetch_danske_spil():
         random_tls_extension_order=True
     )
 
+    # 1. Widen the window to 3 days (72 hours) to catch upcoming games
     now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    future = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    future = (datetime.utcnow() + timedelta(days=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
     
-    # NBA ID: 18608. Change this ID for other leagues.
-    league_id = "18608" 
-    url = f"https://content.sb.danskespil.dk/content-service/api/v1/q/event-list?startTimeFrom={now}&startTimeTo={future}&maxEvents=50&drilldownTagIds={league_id}&includeChildMarkets=true&prioritisePrimaryMarkets=true"
+    league_id = "18608" # NBA
+    
+    # 2. Use the robust URL parameters
+    url = (
+        f"https://content.sb.danskespil.dk/content-service/api/v1/q/event-list?"
+        f"startTimeFrom={now}&startTimeTo={future}"
+        f"&maxEvents=100"
+        f"&drilldownTagIds={league_id}"
+        f"&includeChildMarkets=true"
+        f"&prioritisePrimaryMarkets=true"
+        f"&eventSortsIncluded=MTCH"
+        f"&excludeEventsWithNoMarkets=false"
+        f"&lang=da-DK"
+    )
 
     headers = {
         "authority": "content.sb.danskespil.dk",

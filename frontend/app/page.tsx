@@ -45,7 +45,7 @@ export default function Home() {
   // UI STATE
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
   const [bankroll, setBankroll] = useState(1000);
-  const [minEv, setMinEv] = useState(3.5); // Default: Only show > 2% EV
+  const [minEv, setMinEv] = useState(3.0); // Default: Only show > 2% EV
   const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
 
   // 1. FETCH SCANNER DATA
