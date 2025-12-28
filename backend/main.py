@@ -10,12 +10,19 @@ from thefuzz import process
 import sqlite3
 from pydantic import BaseModel
 from typing import Optional
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.base import JobLookupError
+import pytz
 
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 
 app = FastAPI()
+
+# Initialize Scheduler
+scheduler = BackgroundScheduler()
+scheduler.start()
 
 # --- CONFIGURATION ---
 # Allow your Next.js app (running on port 3000) to talk to this API
@@ -40,6 +47,81 @@ latest_quota = {
     "remaining": "Unknown",
     "used": "Unknown"
 }
+
+# ---------------------------------------------------------
+# CLV SNIPER LOGIC (Background Tasks)
+# ---------------------------------------------------------
+
+def perform_clv_snapshot():
+    """
+    This function runs 10 minutes before game time.
+    It forces a paid API call to capture the Closing Line.
+    """
+    print(f"⏰ CLV SNIPER FIRED: Fetching fresh odds to capture CLV...")
+    
+    # 1. Force Fetch (Spend 1 Credit)
+    pinnacle_data = fetch_pinnacle_cached(require_fresh=True)
+    
+    # 2. Update Database
+    update_clv_for_placed_bets(pinnacle_data)
+    print("✅ CLV Snapshot Complete.")
+
+def schedule_clv_job(game_start_iso: str):
+    """
+    Schedules a job to run 10 minutes before the given game start time.
+    Uses the timestamp as the Job ID to prevent duplicate calls.
+    """
+    try:
+        # 1. Parse Time
+        # API times are usually UTC (Z). We handle them as UTC.
+        game_time = datetime.fromisoformat(game_start_iso.replace('Z', '+00:00'))
+        
+        # 2. Calculate Snapshot Time (10 mins before)
+        snapshot_time = game_time - timedelta(minutes=10)
+        
+        # If the time has already passed, don't schedule
+        if snapshot_time < datetime.now(pytz.utc):
+            print(f"⚠️ Game at {game_start_iso} is too soon/past to schedule CLV sniper.")
+            return
+
+        # 3. Schedule the Job
+        # ID is crucial: If we already have a job for this specific time,
+        # 'replace_existing=True' ensures we don't pay double.
+        job_id = f"clv_{game_start_iso}"
+        
+        scheduler.add_job(
+            perform_clv_snapshot,
+            'date',
+            run_date=snapshot_time,
+            id=job_id,
+            replace_existing=True
+        )
+        
+        print(f"🎯 CLV Sniper armed for: {snapshot_time} (Job ID: {job_id})")
+        
+    except Exception as e:
+        print(f"Error scheduling CLV job: {e}")
+
+def restore_clv_jobs():
+    """
+    On server startup, look at all Pending bets and re-arm the snipers.
+    """
+    print("re-arming CLV Snipers for pending bets...")
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT DISTINCT game_starts_at FROM bets WHERE status = 'Pending'")
+    rows = cursor.fetchall()
+    
+    count = 0
+    for row in rows:
+        if row['game_starts_at']:
+            schedule_clv_job(row['game_starts_at'])
+            count += 1
+            
+    conn.close()
+    print(f"Re-armed {count} CLV jobs.")
 
 # ---------------------------------------------------------
 # 1. DATA FETCHING: DANSKE SPIL (Free - No Cache Needed)
@@ -372,6 +454,7 @@ def init_db():
 
 # Run this on startup
 init_db()
+restore_clv_jobs() # Restore jobs if server restarts
 
 class BetRequest(BaseModel):
     match_name: str
@@ -426,6 +509,8 @@ def get_opportunities(refresh: bool = False):
 @app.post("/api/place-bet")
 def place_bet(bet: BetRequest):
     try:
+        final_time = bet.commence_time if bet.commence_time else datetime.utcnow().isoformat()
+
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''
@@ -447,6 +532,10 @@ def place_bet(bet: BetRequest):
         ))
         conn.commit()
         conn.close()
+
+        # --- ARM THE SNIPER ---
+        if final_time:
+            schedule_clv_job(final_time)
         return {"message": "Bet placed successfully"}
     except Exception as e:
         print(f"Error placing bet: {e}")
