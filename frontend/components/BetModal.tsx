@@ -60,6 +60,9 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
     }
   };
 
+  // VALIDATION: Ensure stake is a number greater than 0
+  const isStakeValid = stake !== "" && !isNaN(parseFloat(stake)) && parseFloat(stake) > 0;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -177,8 +180,14 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
             Cancel
           </button>
           <button 
-            onClick={() => onConfirm(parseFloat(stake))}
-            className="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 transition font-medium"
+            onClick={() => isStakeValid && onConfirm(parseFloat(stake))}
+            disabled={!isStakeValid} // Disable HTML button
+            className={`flex-1 px-4 py-2 rounded-md transition font-medium text-white
+              ${isStakeValid 
+                ? "bg-black hover:bg-gray-800" // Active Style
+                : "bg-gray-300 cursor-not-allowed" // Disabled Style
+              }
+            `}
           >
             Place Bet
           </button>

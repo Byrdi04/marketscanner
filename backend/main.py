@@ -429,8 +429,11 @@ def place_bet(bet: BetRequest):
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO bets (match_name, selection, market_type, handicap, danske_odds, fair_odds, ev_percent, stake)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO bets (
+                match_name, selection, market_type, handicap, 
+                danske_odds, fair_odds, ev_percent, stake, game_starts_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             bet.match_name, 
             bet.selection, 
@@ -446,6 +449,7 @@ def place_bet(bet: BetRequest):
         conn.close()
         return {"message": "Bet placed successfully"}
     except Exception as e:
+        print(f"Error placing bet: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/my-bets")
