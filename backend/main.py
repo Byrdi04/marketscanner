@@ -371,6 +371,60 @@ def update_clv_for_placed_bets(pinnacle_events):
     
     conn.close()
 
+def find_clv_for_paper_bet(bet_row):
+    """
+    Scans the market_snapshots table for the snapshot closest 
+    to the game start time to estimate CLV.
+    """
+    game_start = bet_row['commence_time']
+    # 1. Find the latest snapshot BEFORE or AT game start
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT raw_json FROM market_snapshots 
+        WHERE timestamp <= ? 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    ''', (game_start,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None # No data found before game start
+        
+    pinnacle_events = json.loads(row['raw_json'])
+    
+    # 2. Extract Data (Reusing your existing logic)
+    # We need to find the specific match and market in this old snapshot
+    pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
+    
+    # Fuzzy match the team name
+    match_name, score = process.extractOne(bet_row['match_name'].split(" vs ")[0], pinnacle_home_teams)
+    if score < 85: return None
+
+    p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
+    
+    # Map Market Type
+    p_market_key = {'MoneyLine': 'h2h', 'Spread': 'spreads', 'Total': 'totals'}.get(bet_row['market_type'])
+    if not p_market_key or not p_event.get('markets'): return None
+    
+    p_target_market = next((m for m in p_event['markets'] if m['key'] == p_market_key), None)
+    if not p_target_market: return None
+    
+    # Calculate Fair Odds
+    fair_probs = calculate_fair_probability(p_target_market['outcomes'])
+    
+    # Fuzzy match selection
+    p_selection, sel_score = process.extractOne(bet_row['selection'], list(fair_probs.keys()))
+    if sel_score < 85: return None
+    
+    # Return the Fair Odds (CLV)
+    fair_prob = fair_probs[p_selection]
+    return round(1 / fair_prob, 2)
+
 # ---------------------------------------------------------
 # 3. ANALYSIS LOGIC
 # ---------------------------------------------------------
@@ -506,6 +560,7 @@ def init_db():
             handicap REAL,
             danske_odds REAL,
             pinnacle_odds REAL,
+            closing_odds REAL,
             ev_percent REAL,
             commence_time TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -656,17 +711,27 @@ def settle_paper_bets():
     
     # 3. Grade each bet
     for bet in pending:
-        # We can reuse your existing grade_bet function because 
-        # paper_bets table has the same column names (match_name, selection, etc.)
+        # A. GRADE RESULT
         new_status, result_str = grade_bet(dict(bet), scores_data)
         
-        if new_status and new_status != 'Pending':
+        # B. CALCULATE CLV (New Step)
+        clv_odds = find_clv_for_paper_bet(dict(bet))
+
+        # Update if we have a result OR if we found CLV
+        # (Sometimes we might find CLV before the game score is final, which is fine)
+        if (new_status and new_status != 'Pending') or clv_odds:
+            
+            # Prepare Update
+            # If game isn't over yet, keep status as is, but save CLV
+            final_status = new_status if new_status else bet['status']
+            final_result = result_str if result_str else bet['result_score']
+            
             cursor.execute(
-                "UPDATE paper_bets SET status = ?, result_score = ? WHERE id = ?",
-                (new_status, result_str, bet['id'])
+                "UPDATE paper_bets SET status = ?, result_score = ?, closing_odds = ? WHERE id = ?",
+                (final_status, final_result, clv_odds, bet['id'])
             )
             updated_count += 1
-            print(f"✅ Settled Paper Bet {bet['id']}: {new_status}")
+            print(f"✅ Updated Paper Bet {bet['id']}: {final_status} (CLV: {clv_odds})")
 
     conn.commit()
     conn.close()
@@ -851,6 +916,17 @@ def settle_bets():
     settle_paper_bets()
     
     return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
+
+@app.get("/api/paper-bets")
+def get_paper_bets():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row 
+    cursor = conn.cursor()
+    # Limit to last 500 to keep the UI fast as data grows
+    cursor.execute("SELECT * FROM paper_bets ORDER BY timestamp DESC LIMIT 500")
+    rows = cursor.fetchall()
+    conn.close()
+    return {"data": [dict(row) for row in rows]}
 
 # ---------------------------------------------------------
 # ANALYTICS ENDPOINT

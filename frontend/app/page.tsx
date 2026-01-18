@@ -187,6 +187,9 @@ export default function Home() {
                 View Portfolio →
               </Link>
                 <span className="text-gray-300">|</span>
+                <Link href="/paper-trading" className="text-purple-600 hover:underline font-medium">
+                  Paper Trading 🤖
+                </Link>
                 <Link href="/analytics" className="text-blue-600 hover:underline font-medium">
                   Analytics 📊
                 </Link>
