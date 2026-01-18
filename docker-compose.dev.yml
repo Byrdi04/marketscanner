@@ -1,0 +1,40 @@
+services:
+  # --- Python API Backend ---
+  backend:
+    container_name: market-scanner-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: no
+    volumes:
+      # Map to your local DB file
+      - ./backend/bets.db:/app/bets.db
+    env_file:
+      # Expects a .env file in your project root with API_KEY=...
+      - .env
+    networks:
+      - market-net
+
+  # --- Next.js UI Frontend ---
+  frontend:
+    container_name: market-scanner-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Keep this consistent with server config
+        - BACKEND_URL=http://market-scanner-backend:8000
+    restart: no
+    ports:
+      # Expose to localhost so you can see it
+      - "3000:3000"
+    environment:
+      - TZ=Europe/Copenhagen
+      # Matches the container_name of the backend above
+      - BACKEND_URL=http://market-scanner-backend:8000
+    networks:
+      - market-net
+
+networks:
+  market-net:
+    driver: bridge

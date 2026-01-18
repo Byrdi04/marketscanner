@@ -13,6 +13,7 @@ from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError
 import pytz
+import json
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +24,35 @@ app = FastAPI()
 # Initialize Scheduler
 scheduler = BackgroundScheduler()
 scheduler.start()
+
+def run_scheduled_scan():
+    """
+    The Heartbeat: Runs automatically to harvest data.
+    Checks time to ensure we only run during active hours (07:00 - 23:00).
+    """
+    # 1. Check Business Hours (Server Time)
+    current_hour = datetime.now().hour
+    if current_hour < 7:
+        print(f"💤 Skipping Scan (Night Hours: {current_hour}:00)")
+        return
+
+    print("⏰ Starting Scheduled Market Scan...")
+
+    # 2. Fetch Data (Force Fresh Pinnacle = 1 Credit)
+    danske = fetch_danske_spil()
+    if not danske:
+        print("❌ Scheduled Scan: Danske Spil failed.")
+        return
+
+    # We force refresh=True to get the new snapshot
+    pinnacle = fetch_pinnacle_cached(require_fresh=True)
+    
+    # 3. Analyze & Log
+    # This automatically calls our new log_paper_bets function
+    opportunities = run_analysis(danske, pinnacle)
+    log_paper_bets(opportunities)
+    
+    print(f"✅ Scheduled Scan Complete. Processed {len(opportunities)} opps.")
 
 # --- CONFIGURATION ---
 # Allow your Next.js app (running on port 3000) to talk to this API
@@ -259,6 +289,9 @@ def fetch_pinnacle_cached(require_fresh=True):
         # Parse immediately before caching
         raw_data = response.json()
         clean_data = parse_pinnacle_data(raw_data)
+
+        # Save to Database immediately
+        save_snapshot_to_db(clean_data)
         
         # Update Cache
         pinnacle_cache["data"] = clean_data
@@ -431,6 +464,8 @@ DB_NAME = "bets.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # 1. EXISTING TABLE
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -444,13 +479,233 @@ def init_db():
             stake REAL,
             status TEXT DEFAULT 'Pending',
             result_score TEXT,
-            closing_odds REAL,  -- NEW: To track CLV
+            closing_odds REAL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             game_starts_at TEXT
         )
     ''')
+
+    # 2. NEW TABLE: MARKET SNAPSHOTS
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS market_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            raw_json TEXT
+        )
+    ''')
+
+    # 3. NEW TABLE: PAPER BETS
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS paper_bets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER,
+            match_name TEXT,
+            selection TEXT,
+            market_type TEXT,
+            handicap REAL,
+            danske_odds REAL,
+            pinnacle_odds REAL,
+            ev_percent REAL,
+            commence_time TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'Pending',
+            result_score TEXT,
+            FOREIGN KEY(snapshot_id) REFERENCES market_snapshots(id)
+        )
+    ''')
+
+    # 4. INDICES
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_match ON paper_bets(match_name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_time ON paper_bets(timestamp)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_snapshots_time ON market_snapshots(timestamp)')
+
     conn.commit()
     conn.close()
+    print("Database tables and indices checked/created.")
+
+# Helper funktion to save snapshot data to database
+def save_snapshot_to_db(clean_data):
+    """
+    Saves the cleaned Pinnacle data to the database as a JSON string.
+    Returns the ID of the new snapshot row.
+    """
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Convert the list of Python dictionaries to a text string
+        json_str = json.dumps(clean_data)
+        
+        cursor.execute(
+            "INSERT INTO market_snapshots (raw_json) VALUES (?)", 
+            (json_str,)
+        )
+        new_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        print(f"📸 Snapshot saved to DB with ID: {new_id}")
+        return new_id
+    except Exception as e:
+        print(f"Error saving snapshot: {e}")
+        return None
+
+
+def log_paper_bets(opportunities):
+    """
+    Iterates through opportunities. If EV > 0, checks if we already 
+    have this EXACT bet (same odds/line) logged as the most recent entry.
+    If it's new or changed, saves it to paper_bets.
+    """
+    if not opportunities:
+        return
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 1. Get the latest Snapshot ID to link these bets to
+    cursor.execute("SELECT id FROM market_snapshots ORDER BY id DESC LIMIT 1")
+    row = cursor.fetchone()
+    current_snapshot_id = row[0] if row else None
+
+    count_new = 0
+
+    for op in opportunities:
+        # Only track positive EV for paper betting
+        if op['ev'] <= 0:
+            continue
+
+        # 2. Check the LAST logged bet for this specific match/selection
+        cursor.execute('''
+            SELECT danske_odds, handicap 
+            FROM paper_bets 
+            WHERE match_name = ? AND selection = ? AND market_type = ? 
+            ORDER BY id DESC LIMIT 1
+        ''', (op['match'], op['selection'], op['type']))
+        
+        last_entry = cursor.fetchone()
+
+        # 3. COMPARE: Is this a new price/line?
+        # If last_entry exists, check if data is identical.
+        # We assume 'line' might be None, so we handle that.
+        is_duplicate = False
+        if last_entry:
+            last_odds, last_handicap = last_entry
+            current_handicap = op['line']
+            
+            # Treat None as equal to None
+            lines_match = (last_handicap is None and current_handicap is None) or \
+                          (last_handicap == current_handicap)
+            
+            if last_odds == op['danske_odds'] and lines_match:
+                is_duplicate = True
+
+        # 4. INSERT if not duplicate
+        if not is_duplicate:
+            cursor.execute('''
+                INSERT INTO paper_bets (
+                    snapshot_id, match_name, selection, market_type, 
+                    handicap, danske_odds, pinnacle_odds, ev_percent, commence_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                current_snapshot_id,
+                op['match'],
+                op['selection'],
+                op['type'],
+                op['line'],
+                op['danske_odds'],
+                op['fair_odds'], # We store the "Fair" price as our benchmark
+                op['ev'],
+                op['commence_time']
+            ))
+            count_new += 1
+
+    conn.commit()
+    conn.close()
+    if count_new > 0:
+        print(f"📝 Logged {count_new} new/changed Paper Bets.")
+
+
+def settle_paper_bets():
+    """
+    Background task: Grades all pending PAPER bets.
+    Reuses the existing grade_bet logic since column names are identical.
+    """
+    print("⚖️ Starting Paper Bet Settlement...")
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # 1. Get Pending Paper Bets
+    cursor.execute("SELECT * FROM paper_bets WHERE status = 'Pending'")
+    pending = cursor.fetchall()
+    
+    if not pending:
+        print("No pending paper bets to settle.")
+        conn.close()
+        return
+
+    # 2. Get Scores (Uses your existing function)
+    scores_data = fetch_nba_scores()
+    if not scores_data:
+        print("Could not fetch scores for settlement.")
+        conn.close()
+        return
+
+    updated_count = 0
+    
+    # 3. Grade each bet
+    for bet in pending:
+        # We can reuse your existing grade_bet function because 
+        # paper_bets table has the same column names (match_name, selection, etc.)
+        new_status, result_str = grade_bet(dict(bet), scores_data)
+        
+        if new_status and new_status != 'Pending':
+            cursor.execute(
+                "UPDATE paper_bets SET status = ?, result_score = ? WHERE id = ?",
+                (new_status, result_str, bet['id'])
+            )
+            updated_count += 1
+            print(f"✅ Settled Paper Bet {bet['id']}: {new_status}")
+
+    conn.commit()
+    conn.close()
+    print(f"🏁 Paper Settlement Complete. Updated {updated_count}/{len(pending)} bets.")
+
+# STARTUP: Schedule the Heartbeat
+# 'cron' trigger allows us to specify "every 90 minutes" somewhat loosely, 
+# but 'interval' is easier. We handle the 7-23 check inside the function.
+
+try:
+    # Remove existing job if it exists (to prevent duplicates on reload)
+    scheduler.remove_job('market_heartbeat')
+except JobLookupError:
+    pass
+
+scheduler.add_job(
+    run_scheduled_scan, 
+    'interval', 
+    minutes=90, 
+    id='market_heartbeat',
+    replace_existing=True
+)
+
+print("📅 Automated 'Heartbeat' Scanner scheduled (Every 90 mins).")
+
+# SETTLEMENT: Run once a day at 5:00 AM
+try:
+    scheduler.remove_job('daily_settlement')
+except JobLookupError:
+    pass
+
+scheduler.add_job(
+    settle_paper_bets, 
+    'cron', 
+    hour=5,      # 05:00 AM
+    minute=0, 
+    id='daily_settlement',
+    replace_existing=True
+)
+print("⚖️ Daily Settlement scheduled for 05:00 AM.")
 
 # Run this on startup
 init_db()
@@ -493,6 +748,8 @@ def get_opportunities(refresh: bool = False):
     update_clv_for_placed_bets(pinnacle_data)
 
     opportunities = run_analysis(danske_data, pinnacle_data)
+
+    log_paper_bets(opportunities)
     
     return {
         "timestamp": datetime.now().isoformat(),
@@ -588,6 +845,9 @@ def settle_bets():
 
     conn.commit()
     conn.close()
+
+    # Trigger Paper Settlement too <<<
+    settle_paper_bets()
     
     return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
 
