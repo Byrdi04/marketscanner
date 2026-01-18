@@ -459,7 +459,8 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
 # ---------------------------------------------------------
 # 4. DATABASE SETUP (SQLite)
 # ---------------------------------------------------------
-DB_NAME = "bets.db"
+#DB_NAME = "bets.db"
+DB_NAME = "data/bets.db" 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
