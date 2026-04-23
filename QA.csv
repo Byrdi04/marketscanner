@@ -1,0 +1,156 @@
+,match_name,selection,market_type,handicap,commence_time,status,result_score
+2,Sacramento Kings vs Portland Trail Blazers,Sacramento Kings,Spread,-4.5,2026-01-19 02:00:00+00:00,Lost,Sacramento Kings 110 - 117 Portland Trail Blazers
+25,Philadelphia 76ers vs Indiana Pacers,Philadelphia 76ers,Spread,-9.5,2026-01-20 00:00:00+00:00,Lost,Philadelphia 76ers 113 - 104 Indiana Pacers
+76,Chicago Bulls vs Los Angeles Clippers,Los Angeles Clippers,Spread,2.5,2026-01-21 01:00:00+00:00,Lost,Chicago Bulls 138 - 110 Los Angeles Clippers
+77,Utah Jazz vs Minnesota Timberwolves,Minnesota Timberwolves,Spread,-12.5,2026-01-21 02:00:00+00:00,Lost,Utah Jazz 127 - 122 Minnesota Timberwolves
+78,Houston Rockets vs San Antonio Spurs,Houston Rockets,Spread,-5.5,2026-01-21 01:00:00+00:00,Lost,Houston Rockets 111 - 106 San Antonio Spurs
+85,Denver Nuggets vs Los Angeles Lakers,Los Angeles Lakers,Spread,-4.5,2026-01-21 03:00:00+00:00,Won,Denver Nuggets 107 - 115 Los Angeles Lakers
+111,New York Knicks vs Brooklyn Nets,Brooklyn Nets,Spread,9.5,2026-01-22 00:30:00+00:00,Lost,New York Knicks 120 - 66 Brooklyn Nets
+139,Philadelphia 76ers vs Houston Rockets,Houston Rockets,Spread,-3.5,2026-01-23 00:00:00+00:00,Lost,Philadelphia 76ers 128 - 122 Houston Rockets
+164,Brooklyn Nets vs Boston Celtics,Brooklyn Nets,Spread,6.5,2026-01-24 00:30:00+00:00,Won,Brooklyn Nets 126 - 130 Boston Celtics
+165,Portland Trail Blazers vs Toronto Raptors,Toronto Raptors,Spread,-5.5,2026-01-24 03:00:00+00:00,Won,Portland Trail Blazers 98 - 110 Toronto Raptors
+166,Atlanta Hawks vs Phoenix Suns,Phoenix Suns,Spread,-4.5,2026-01-24 00:30:00+00:00,Lost,Atlanta Hawks 110 - 103 Phoenix Suns
+209,Chicago Bulls vs Boston Celtics,Chicago Bulls,Spread,-2.5,2026-01-25 01:00:00+00:00,Won,Chicago Bulls 114 - 111 Boston Celtics
+215,Utah Jazz vs Miami Heat,Miami Heat,Spread,-7.5,2026-01-25 02:30:00+00:00,Won,Utah Jazz 116 - 147 Miami Heat
+244,Minnesota Timberwolves vs Golden State Warriors,Minnesota Timberwolves,Spread,-8.5,2026-01-25 22:30:00+00:00,Won,Minnesota Timberwolves 108 - 83 Golden State Warriors
+246,San Antonio Spurs vs New Orleans Pelicans,New Orleans Pelicans,Spread,10.5,2026-01-26 00:00:00+00:00,Won,San Antonio Spurs 95 - 104 New Orleans Pelicans
+317,Washington Wizards vs Portland Trail Blazers,Washington Wizards,Spread,6.5,2026-01-28 00:00:00+00:00,Won,Washington Wizards 115 - 111 Portland Trail Blazers
+324,Philadelphia 76ers vs Milwaukee Bucks,Philadelphia 76ers,Spread,-11.5,2026-01-28 01:00:00+00:00,Won,Philadelphia 76ers 139 - 122 Milwaukee Bucks
+326,Denver Nuggets vs Detroit Pistons,Denver Nuggets,Spread,5.5,2026-01-28 02:00:00+00:00,Won,Denver Nuggets 107 - 109 Detroit Pistons
+356,Memphis Grizzlies vs Charlotte Hornets,Charlotte Hornets,Spread,-3.5,2026-01-29 01:00:00+00:00,Won,Memphis Grizzlies 97 - 112 Charlotte Hornets
+357,Indiana Pacers vs Chicago Bulls,Chicago Bulls,Spread,-3.5,2026-01-29 00:00:00+00:00,Lost,Indiana Pacers 113 - 110 Chicago Bulls
+367,Dallas Mavericks vs Minnesota Timberwolves,Dallas Mavericks,Spread,5.5,2026-01-29 01:30:00+00:00,Lost,Dallas Mavericks 105 - 118 Minnesota Timberwolves
+401,Philadelphia 76ers vs Sacramento Kings,Philadelphia 76ers,Spread,-13.5,2026-01-30 00:00:00+00:00,Lost,Philadelphia 76ers 113 - 111 Sacramento Kings
+403,Washington Wizards vs Milwaukee Bucks,Milwaukee Bucks,Spread,-3.5,2026-01-30 00:00:00+00:00,Lost,Washington Wizards 109 - 99 Milwaukee Bucks
+404,Minnesota Timberwolves vs Oklahoma City Thunder,Oklahoma City Thunder,Spread,-7.5,2026-01-30 02:30:00+00:00,Lost,Minnesota Timberwolves 123 - 111 Oklahoma City Thunder
+412,Dallas Mavericks vs Charlotte Hornets,Charlotte Hornets,Spread,-6.5,2026-01-30 01:30:00+00:00,Lost,Dallas Mavericks 121 - 123 Charlotte Hornets
+444,Washington Wizards vs Los Angeles Lakers,Los Angeles Lakers,Spread,-10.5,2026-01-31 00:00:00+00:00,Won,Washington Wizards 111 - 142 Los Angeles Lakers
+445,Denver Nuggets vs Los Angeles Clippers,Los Angeles Clippers,Spread,-6.5,2026-01-31 02:00:00+00:00,Lost,Denver Nuggets 122 - 109 Los Angeles Clippers
+456,Phoenix Suns vs Cleveland Cavaliers,Phoenix Suns,Spread,3.5,2026-01-31 02:00:00+00:00,Won,Phoenix Suns 126 - 113 Cleveland Cavaliers
+493,Memphis Grizzlies vs Minnesota Timberwolves,Minnesota Timberwolves,Spread,-9.5,2026-02-01 01:00:00+00:00,Won,Memphis Grizzlies 114 - 131 Minnesota Timberwolves
+502,Philadelphia 76ers vs New Orleans Pelicans,Philadelphia 76ers,Spread,-11.5,2026-02-01 00:30:00+00:00,Lost,Philadelphia 76ers 124 - 114 New Orleans Pelicans
+524,Denver Nuggets vs Oklahoma City Thunder,Oklahoma City Thunder,Spread,-5.5,2026-02-02 02:30:00+00:00,Won,Denver Nuggets 111 - 121 Oklahoma City Thunder
+525,Miami Heat vs Chicago Bulls,Miami Heat,Spread,-5.5,2026-02-01 23:10:00+00:00,Won,Miami Heat 134 - 91 Chicago Bulls
+526,San Antonio Spurs vs Orlando Magic,Orlando Magic,Spread,4.5,2026-02-02 00:00:00+00:00,Lost,San Antonio Spurs 112 - 103 Orlando Magic
+527,New York Knicks vs Los Angeles Lakers,New York Knicks,Spread,-6.5,2026-02-02 00:00:00+00:00,Won,New York Knicks 112 - 100 Los Angeles Lakers
+584,Charlotte Hornets vs New Orleans Pelicans,Charlotte Hornets,Spread,-8.5,2026-02-02 20:00:00+00:00,Lost,Charlotte Hornets 102 - 95 New Orleans Pelicans
+586,Memphis Grizzlies vs Minnesota Timberwolves,Minnesota Timberwolves,Spread,-9.5,2026-02-03 00:30:00+00:00,Lost,Memphis Grizzlies 137 - 128 Minnesota Timberwolves
+606,Oklahoma City Thunder vs Orlando Magic,Oklahoma City Thunder,Spread,-8.5,2026-02-04 01:00:00+00:00,Won,Oklahoma City Thunder 128 - 92 Orlando Magic
+607,Milwaukee Bucks vs Chicago Bulls,Chicago Bulls,Spread,-4.5,2026-02-04 01:00:00+00:00,Lost,Milwaukee Bucks 131 - 115 Chicago Bulls
+613,Dallas Mavericks vs Boston Celtics,Boston Celtics,Spread,-9.5,2026-02-04 01:00:00+00:00,Won,Dallas Mavericks 100 - 110 Boston Celtics
+618,Golden State Warriors vs Philadelphia 76ers,Golden State Warriors,Spread,-4.5,2026-02-04 03:00:00+00:00,Lost,Golden State Warriors 94 - 113 Philadelphia 76ers
+619,Detroit Pistons vs Denver Nuggets,Detroit Pistons,Spread,-5.5,2026-02-04 00:00:00+00:00,Lost,Detroit Pistons 124 - 121 Denver Nuggets
+623,Brooklyn Nets vs Los Angeles Lakers,Los Angeles Lakers,Spread,-9.5,2026-02-04 00:30:00+00:00,Won,Brooklyn Nets 109 - 125 Los Angeles Lakers
+667,Houston Rockets vs Boston Celtics,Boston Celtics,Spread,4.5,2026-02-05 01:00:00+00:00,Won,Houston Rockets 93 - 114 Boston Celtics
+668,Milwaukee Bucks vs New Orleans Pelicans,Milwaukee Bucks,Spread,3.5,2026-02-05 01:00:00+00:00,Won,Milwaukee Bucks 141 - 137 New Orleans Pelicans
+672,Toronto Raptors vs Minnesota Timberwolves,Minnesota Timberwolves,Spread,-2.5,2026-02-05 00:30:00+00:00,Lost,Toronto Raptors 126 - 128 Minnesota Timberwolves
+675,New York Knicks vs Denver Nuggets,New York Knicks,Spread,-7.5,2026-02-05 00:00:00+00:00,Lost,New York Knicks 134 - 127 Denver Nuggets
+676,Los Angeles Clippers vs Cleveland Cavaliers,Cleveland Cavaliers,Spread,-3.5,2026-02-05 03:30:00+00:00,Won,Los Angeles Clippers 91 - 124 Cleveland Cavaliers
+704,Dallas Mavericks vs San Antonio Spurs,San Antonio Spurs,Spread,-8.5,2026-02-06 01:30:00+00:00,Won,Dallas Mavericks 123 - 135 San Antonio Spurs
+705,Toronto Raptors vs Chicago Bulls,Toronto Raptors,Spread,-9.5,2026-02-06 00:30:00+00:00,Won,Toronto Raptors 123 - 107 Chicago Bulls
+710,Atlanta Hawks vs Utah Jazz,Utah Jazz,Spread,8.5,2026-02-06 00:30:00+00:00,Won,Atlanta Hawks 121 - 119 Utah Jazz
+749,Portland Trail Blazers vs Memphis Grizzlies,Portland Trail Blazers,Spread,-8.5,2026-02-07 03:00:00+00:00,Lost,Portland Trail Blazers 122 - 115 Memphis Grizzlies
+756,Boston Celtics vs Miami Heat,Boston Celtics,Spread,-8.5,2026-02-07 00:30:00+00:00,Lost,Boston Celtics 98 - 96 Miami Heat
+762,Minnesota Timberwolves vs New Orleans Pelicans,Minnesota Timberwolves,Spread,-12.5,2026-02-07 01:00:00+00:00,Lost,Minnesota Timberwolves 115 - 119 New Orleans Pelicans
+794,Sacramento Kings vs Cleveland Cavaliers,Cleveland Cavaliers,Spread,-13.5,2026-02-08 03:00:00+00:00,Lost,Sacramento Kings 126 - 132 Cleveland Cavaliers
+795,Atlanta Hawks vs Charlotte Hornets,Charlotte Hornets,Spread,-3.5,2026-02-08 00:30:00+00:00,Won,Atlanta Hawks 119 - 126 Charlotte Hornets
+796,San Antonio Spurs vs Dallas Mavericks,Dallas Mavericks,Spread,8.5,2026-02-07 23:00:00+00:00,Lost,San Antonio Spurs 138 - 125 Dallas Mavericks
+867,Golden State Warriors vs Memphis Grizzlies,Memphis Grizzlies,Spread,5.5,2026-02-10 03:00:00+00:00,Won,Golden State Warriors 114 - 113 Memphis Grizzlies
+868,Charlotte Hornets vs Detroit Pistons,Charlotte Hornets,Spread,1.5,2026-02-10 00:00:00+00:00,Lost,Charlotte Hornets 104 - 110 Detroit Pistons
+869,Brooklyn Nets vs Chicago Bulls,Brooklyn Nets,Spread,2.5,2026-02-10 00:30:00+00:00,Won,Brooklyn Nets 123 - 115 Chicago Bulls
+879,Los Angeles Lakers vs Oklahoma City Thunder,Oklahoma City Thunder,Spread,-7.5,2026-02-10 03:00:00+00:00,Won,Los Angeles Lakers 110 - 119 Oklahoma City Thunder
+933,Los Angeles Lakers vs San Antonio Spurs,San Antonio Spurs,Spread,-9.5,2026-02-11 03:30:00+00:00,Won,Los Angeles Lakers 108 - 136 San Antonio Spurs
+938,New York Knicks vs Indiana Pacers,Indiana Pacers,Spread,10.5,2026-02-11 00:30:00+00:00,Won,New York Knicks 134 - 137 Indiana Pacers
+939,Phoenix Suns vs Dallas Mavericks,Phoenix Suns,Spread,-9.5,2026-02-11 02:00:00+00:00,Lost,Phoenix Suns 120 - 111 Dallas Mavericks
+968,Charlotte Hornets vs Atlanta Hawks,Atlanta Hawks,Spread,3.5,2026-02-12 00:00:00+00:00,Won,Charlotte Hornets 110 - 107 Atlanta Hawks
+969,Golden State Warriors vs San Antonio Spurs,San Antonio Spurs,Spread,-8.5,2026-02-12 03:00:00+00:00,Won,Golden State Warriors 113 - 126 San Antonio Spurs
+970,Brooklyn Nets vs Indiana Pacers,Brooklyn Nets,Spread,-5.5,2026-02-12 00:30:00+00:00,Lost,Brooklyn Nets 110 - 115 Indiana Pacers
+977,Houston Rockets vs Los Angeles Clippers,Houston Rockets,Spread,-9.5,2026-02-12 01:00:00+00:00,Lost,Houston Rockets 102 - 105 Los Angeles Clippers
+987,New Orleans Pelicans vs Miami Heat,Miami Heat,Spread,-2.5,2026-02-12 01:00:00+00:00,Won,New Orleans Pelicans 111 - 123 Miami Heat
+1053,Los Angeles Lakers vs Dallas Mavericks,Los Angeles Lakers,Spread,-8.5,2026-02-13 03:00:00+00:00,Won,Los Angeles Lakers 124 - 104 Dallas Mavericks
+1074,Sacramento Kings vs Orlando Magic,Orlando Magic,Spread,-10.5,2026-02-20 03:00:00+00:00,Won,Sacramento Kings 94 - 131 Orlando Magic
+1075,Golden State Warriors vs Boston Celtics,Boston Celtics,Spread,-6.5,2026-02-20 03:00:00+00:00,Won,Golden State Warriors 110 - 121 Boston Celtics
+1076,Los Angeles Clippers vs Denver Nuggets,Denver Nuggets,Spread,-5.5,2026-02-20 03:30:00+00:00,Lost,Los Angeles Clippers 115 - 114 Denver Nuggets
+1109,New Orleans Pelicans vs Milwaukee Bucks,Milwaukee Bucks,Spread,2.5,2026-02-21 01:00:00+00:00,Won,New Orleans Pelicans 118 - 139 Milwaukee Bucks
+1113,Washington Wizards vs Indiana Pacers,Indiana Pacers,Spread,-3.5,2026-02-21 00:00:00+00:00,Lost,Washington Wizards 131 - 118 Indiana Pacers
+1114,Oklahoma City Thunder vs Brooklyn Nets,Brooklyn Nets,Spread,15.5,2026-02-21 01:00:00+00:00,Lost,Oklahoma City Thunder 105 - 86 Brooklyn Nets
+1155,New York Knicks vs Houston Rockets,New York Knicks,Spread,-5.5,2026-02-22 01:30:00+00:00,Lost,New York Knicks 108 - 106 Houston Rockets
+1156,Miami Heat vs Memphis Grizzlies,Miami Heat,Spread,-11.5,2026-02-22 01:00:00+00:00,Won,Miami Heat 136 - 120 Memphis Grizzlies
+1170,San Antonio Spurs vs Sacramento Kings,Sacramento Kings,Spread,16.5,2026-02-22 01:00:00+00:00,Lost,San Antonio Spurs 139 - 122 Sacramento Kings
+1192,Los Angeles Clippers vs Orlando Magic,Orlando Magic,Spread,2.5,2026-02-23 02:00:00+00:00,Won,Los Angeles Clippers 109 - 111 Orlando Magic
+1193,Golden State Warriors vs Denver Nuggets,Denver Nuggets,Spread,-6.5,2026-02-22 20:30:00+00:00,Lost,Golden State Warriors 128 - 117 Denver Nuggets
+1194,Minnesota Timberwolves vs Philadelphia 76ers,Philadelphia 76ers,Spread,7.5,2026-02-23 00:00:00+00:00,Won,Minnesota Timberwolves 108 - 135 Philadelphia 76ers
+1200,Los Angeles Lakers vs Boston Celtics,Boston Celtics,Spread,-3.5,2026-02-22 23:30:00+00:00,Won,Los Angeles Lakers 89 - 111 Boston Celtics
+1239,Houston Rockets vs Utah Jazz,Utah Jazz,Spread,12.5,2026-02-24 02:30:00+00:00,Lost,Houston Rockets 125 - 105 Utah Jazz
+1256,Los Angeles Lakers vs Orlando Magic,Los Angeles Lakers,Spread,-6.5,2026-02-25 03:30:00+00:00,Lost,Los Angeles Lakers 109 - 110 Orlando Magic
+1257,Chicago Bulls vs Charlotte Hornets,Charlotte Hornets,Spread,-10.5,2026-02-25 01:00:00+00:00,Won,Chicago Bulls 99 - 131 Charlotte Hornets
+1268,Toronto Raptors vs Oklahoma City Thunder,Oklahoma City Thunder,Spread,-2.5,2026-02-25 00:30:00+00:00,Won,Toronto Raptors 107 - 116 Oklahoma City Thunder
+1269,Indiana Pacers vs Philadelphia 76ers,Philadelphia 76ers,Spread,-10.5,2026-02-25 00:00:00+00:00,Won,Indiana Pacers 114 - 135 Philadelphia 76ers
+1270,Cleveland Cavaliers vs New York Knicks,Cleveland Cavaliers,Spread,-5.5,2026-02-25 00:30:00+00:00,Won,Cleveland Cavaliers 109 - 94 New York Knicks
+1355,Dallas Mavericks vs Sacramento Kings,Dallas Mavericks,Spread,-8.5,2026-02-27 01:30:00+00:00,Lost,Dallas Mavericks 121 - 130 Sacramento Kings
+1404,Boston Celtics vs Brooklyn Nets,Boston Celtics,Spread,-19.5,2026-02-28 00:30:00+00:00,Won,Boston Celtics 148 - 111 Brooklyn Nets
+1408,Milwaukee Bucks vs New York Knicks,New York Knicks,Spread,-9.5,2026-02-28 01:00:00+00:00,Won,Milwaukee Bucks 98 - 127 New York Knicks
+1410,Detroit Pistons vs Cleveland Cavaliers,Detroit Pistons,Spread,-7.5,2026-02-28 00:00:00+00:00,Lost,Detroit Pistons 122 - 119 Cleveland Cavaliers
+1444,Utah Jazz vs New Orleans Pelicans,New Orleans Pelicans,Spread,-8.5,2026-03-01 02:30:00+00:00,Won,Utah Jazz 105 - 115 New Orleans Pelicans
+1459,Denver Nuggets vs Minnesota Timberwolves,Denver Nuggets,Spread,-4.5,2026-03-01 20:30:00+00:00,Lost,Denver Nuggets 108 - 117 Minnesota Timberwolves
+1460,Brooklyn Nets vs Cleveland Cavaliers,Cleveland Cavaliers,Spread,-13.5,2026-03-01 20:30:00+00:00,Lost,Brooklyn Nets 102 - 106 Cleveland Cavaliers
+1503,Golden State Warriors vs Los Angeles Clippers,Los Angeles Clippers,Spread,-3.5,2026-03-03 03:00:00+00:00,Won,Golden State Warriors 101 - 114 Los Angeles Clippers
+1558,New York Knicks vs Oklahoma City Thunder,New York Knicks,Spread,3.5,2026-03-05 00:00:00+00:00,Won,New York Knicks 100 - 103 Oklahoma City Thunder
+1560,Milwaukee Bucks vs Atlanta Hawks,Milwaukee Bucks,Spread,-2.5,2026-03-05 02:30:00+00:00,Lost,Milwaukee Bucks 113 - 131 Atlanta Hawks
+1561,Philadelphia 76ers vs Utah Jazz,Philadelphia 76ers,Spread,-10.5,2026-03-05 00:30:00+00:00,Lost,Philadelphia 76ers 106 - 102 Utah Jazz
+1568,Memphis Grizzlies vs Portland Trail Blazers,Portland Trail Blazers,Spread,-10.5,2026-03-05 01:00:00+00:00,Lost,Memphis Grizzlies 114 - 122 Portland Trail Blazers
+1591,Denver Nuggets vs Los Angeles Lakers,Denver Nuggets,Spread,-6.5,2026-03-06 03:00:00+00:00,Won,Denver Nuggets 120 - 113 Los Angeles Lakers
+1594,Orlando Magic vs Dallas Mavericks,Orlando Magic,Spread,-10.5,2026-03-06 00:00:00+00:00,Lost,Orlando Magic 115 - 114 Dallas Mavericks
+1603,Phoenix Suns vs Chicago Bulls,Chicago Bulls,Spread,9.5,2026-03-06 02:00:00+00:00,Won,Phoenix Suns 103 - 105 Chicago Bulls
+1636,Charlotte Hornets vs Miami Heat,Charlotte Hornets,Spread,-8.5,2026-03-07 00:00:00+00:00,Lost,Charlotte Hornets 120 - 128 Miami Heat
+1637,Denver Nuggets vs New York Knicks,New York Knicks,Spread,-2.5,2026-03-07 02:00:00+00:00,Won,Denver Nuggets 103 - 142 New York Knicks
+1642,Houston Rockets vs Portland Trail Blazers,Portland Trail Blazers,Spread,4.5,2026-03-07 01:00:00+00:00,Lost,Houston Rockets 106 - 99 Portland Trail Blazers
+1644,Los Angeles Lakers vs Indiana Pacers,Los Angeles Lakers,Spread,-11.5,2026-03-07 03:30:00+00:00,Lost,Los Angeles Lakers 128 - 117 Indiana Pacers
+1648,Boston Celtics vs Dallas Mavericks,Dallas Mavericks,Spread,13.5,2026-03-07 00:00:00+00:00,Lost,Boston Celtics 120 - 100 Dallas Mavericks
+1651,Phoenix Suns vs New Orleans Pelicans,New Orleans Pelicans,Spread,4.5,2026-03-07 02:00:00+00:00,Won,Phoenix Suns 118 - 116 New Orleans Pelicans
+1674,Memphis Grizzlies vs Los Angeles Clippers,Memphis Grizzlies,Spread,4.5,2026-03-08 01:00:00+00:00,Won,Memphis Grizzlies 120 - 123 Los Angeles Clippers
+1675,Detroit Pistons vs Brooklyn Nets,Detroit Pistons,Spread,-15.5,2026-03-07 23:00:00+00:00,Lost,Detroit Pistons 105 - 107 Brooklyn Nets
+1680,Milwaukee Bucks vs Utah Jazz,Milwaukee Bucks,Spread,-12.5,2026-03-08 01:00:00+00:00,Won,Milwaukee Bucks 113 - 99 Utah Jazz
+1706,Milwaukee Bucks vs Orlando Magic,Milwaukee Bucks,Spread,2.5,2026-03-09 00:00:00+00:00,Lost,Milwaukee Bucks 91 - 130 Orlando Magic
+1759,Oklahoma City Thunder vs Denver Nuggets,Denver Nuggets,Spread,5.5,2026-03-09 23:30:00+00:00,Won,Oklahoma City Thunder 129 - 126 Denver Nuggets
+1760,Utah Jazz vs Golden State Warriors,Golden State Warriors,Spread,-6.5,2026-03-10 01:00:00+00:00,Lost,Utah Jazz 119 - 116 Golden State Warriors
+1788,Atlanta Hawks vs Dallas Mavericks,Dallas Mavericks,Spread,7.5,2026-03-10 23:30:00+00:00,Lost,Atlanta Hawks 124 - 112 Dallas Mavericks
+1789,Milwaukee Bucks vs Phoenix Suns,Phoenix Suns,Spread,-3.5,2026-03-11 00:00:00+00:00,Won,Milwaukee Bucks 114 - 129 Phoenix Suns
+1819,Denver Nuggets vs Houston Rockets,Denver Nuggets,Spread,-7.5,2026-03-12 02:00:00+00:00,Won,Denver Nuggets 129 - 93 Houston Rockets
+1836,Los Angeles Lakers vs Chicago Bulls,Los Angeles Lakers,Spread,-12.5,2026-03-13 02:30:00+00:00,Lost,Los Angeles Lakers 142 - 130 Chicago Bulls
+1841,Oklahoma City Thunder vs Boston Celtics,Boston Celtics,Spread,5.5,2026-03-13 01:30:00+00:00,Won,Oklahoma City Thunder 104 - 102 Boston Celtics
+1875,Houston Rockets vs New Orleans Pelicans,New Orleans Pelicans,Spread,5.5,2026-03-14 00:00:00+00:00,Won,Houston Rockets 107 - 105 New Orleans Pelicans
+1882,Golden State Warriors vs Minnesota Timberwolves,Minnesota Timberwolves,Spread,-7.5,2026-03-14 02:00:00+00:00,Won,Golden State Warriors 117 - 127 Minnesota Timberwolves
+1910,Los Angeles Clippers vs Sacramento Kings,Los Angeles Clippers,Spread,-15.5,2026-03-15 02:30:00+00:00,Lost,Los Angeles Clippers 109 - 118 Sacramento Kings
+1938,Sacramento Kings vs Utah Jazz,Sacramento Kings,Spread,-3.5,2026-03-16 02:00:00+00:00,Won,Sacramento Kings 116 - 111 Utah Jazz
+1966,Boston Celtics vs Phoenix Suns,Boston Celtics,Spread,-10.5,2026-03-16 23:30:00+00:00,Lost,Boston Celtics 120 - 112 Phoenix Suns
+1967,Brooklyn Nets vs Portland Trail Blazers,Portland Trail Blazers,Spread,-11.5,2026-03-16 23:30:00+00:00,Won,Brooklyn Nets 95 - 114 Portland Trail Blazers
+1973,Los Angeles Clippers vs San Antonio Spurs,Los Angeles Clippers,Spread,8.5,2026-03-17 02:00:00+00:00,Won,Los Angeles Clippers 115 - 119 San Antonio Spurs
+2002,Charlotte Hornets vs Miami Heat,Charlotte Hornets,Spread,-5.5,2026-03-17 23:00:00+00:00,Won,Charlotte Hornets 136 - 106 Miami Heat
+2028,Dallas Mavericks vs Atlanta Hawks,Atlanta Hawks,Spread,-9.5,2026-03-19 00:30:00+00:00,Won,Dallas Mavericks 120 - 135 Atlanta Hawks
+2048,Utah Jazz vs Milwaukee Bucks,Milwaukee Bucks,Spread,-6.5,2026-03-20 01:00:00+00:00,Lost,Utah Jazz 128 - 96 Milwaukee Bucks
+2092,Houston Rockets vs Atlanta Hawks,Atlanta Hawks,Spread,2.5,2026-03-21 00:00:00+00:00,Lost,Houston Rockets 117 - 95 Atlanta Hawks
+2099,Minnesota Timberwolves vs Portland Trail Blazers,Portland Trail Blazers,Spread,1.5,2026-03-21 00:00:00+00:00,Won,Minnesota Timberwolves 104 - 108 Portland Trail Blazers
+2115,Orlando Magic vs Los Angeles Lakers,Orlando Magic,Spread,1.5,2026-03-21 23:00:00+00:00,Won,Orlando Magic 104 - 105 Los Angeles Lakers
+2116,Dallas Mavericks vs Los Angeles Clippers,Dallas Mavericks,Spread,5.5,2026-03-22 00:30:00+00:00,Lost,Dallas Mavericks 131 - 138 Los Angeles Clippers
+2129,Utah Jazz vs Philadelphia 76ers,Utah Jazz,Spread,4.5,2026-03-22 01:30:00+00:00,Lost,Utah Jazz 116 - 126 Philadelphia 76ers
+2169,Los Angeles Clippers vs Milwaukee Bucks,Los Angeles Clippers,Spread,-14.5,2026-03-24 02:30:00+00:00,Won,Los Angeles Clippers 129 - 96 Milwaukee Bucks
+2171,Chicago Bulls vs Houston Rockets,Chicago Bulls,Spread,6.5,2026-03-24 00:00:00+00:00,Won,Chicago Bulls 132 - 124 Houston Rockets
+2220,Indiana Pacers vs Los Angeles Lakers,Indiana Pacers,Spread,9.5,2026-03-25 23:00:00+00:00,Won,Indiana Pacers 130 - 137 Los Angeles Lakers
+2221,Portland Trail Blazers vs Milwaukee Bucks,Portland Trail Blazers,Spread,-14.5,2026-03-26 02:00:00+00:00,Won,Portland Trail Blazers 130 - 99 Milwaukee Bucks
+2246,Detroit Pistons vs New Orleans Pelicans,Detroit Pistons,Spread,-6.5,2026-03-26 23:00:00+00:00,Won,Detroit Pistons 129 - 108 New Orleans Pelicans
+2259,Cleveland Cavaliers vs Miami Heat,Miami Heat,Spread,3.5,2026-03-27 23:30:00+00:00,Lost,Cleveland Cavaliers 149 - 128 Miami Heat
+2261,Toronto Raptors vs New Orleans Pelicans,New Orleans Pelicans,Spread,6.5,2026-03-28 00:30:00+00:00,Lost,Toronto Raptors 119 - 106 New Orleans Pelicans
+2262,Indiana Pacers vs Los Angeles Clippers,Los Angeles Clippers,Spread,-10.5,2026-03-27 23:00:00+00:00,Lost,Indiana Pacers 113 - 114 Los Angeles Clippers
+2361,Los Angeles Lakers vs Cleveland Cavaliers,Los Angeles Lakers,Spread,-4.5,2026-04-01 02:30:00+00:00,Won,Los Angeles Lakers 127 - 113 Cleveland Cavaliers
+2364,Brooklyn Nets vs Charlotte Hornets,Charlotte Hornets,Spread,-16.5,2026-03-31 23:30:00+00:00,Won,Brooklyn Nets 86 - 117 Charlotte Hornets
+2370,Los Angeles Clippers vs Portland Trail Blazers,Portland Trail Blazers,Spread,4.5,2026-04-01 03:00:00+00:00,Won,Los Angeles Clippers 104 - 114 Portland Trail Blazers
+2394,Miami Heat vs Boston Celtics,Miami Heat,Spread,3.5,2026-04-01 23:30:00+00:00,Lost,Miami Heat 129 - 147 Boston Celtics
+2397,Utah Jazz vs Denver Nuggets,Utah Jazz,Spread,15.5,2026-04-02 01:00:00+00:00,Won,Utah Jazz 117 - 130 Denver Nuggets
+2488,Philadelphia 76ers vs Detroit Pistons,Detroit Pistons,Spread,-3.5,2026-04-04 23:00:00+00:00,Won,Philadelphia 76ers 93 - 116 Detroit Pistons
+2498,Minnesota Timberwolves vs Charlotte Hornets,Charlotte Hornets,Spread,-2.5,2026-04-05 23:00:00+00:00,Won,Minnesota Timberwolves 108 - 122 Charlotte Hornets
+2499,Chicago Bulls vs Phoenix Suns,Phoenix Suns,Spread,-10.5,2026-04-05 19:30:00+00:00,Lost,Chicago Bulls 110 - 120 Phoenix Suns
+2554,New Orleans Pelicans vs Utah Jazz,Utah Jazz,Spread,10.5,2026-04-08 00:00:00+00:00,Lost,New Orleans Pelicans 156 - 137 Utah Jazz
+2574,Orlando Magic vs Minnesota Timberwolves,Orlando Magic,Spread,-7.5,2026-04-08 23:00:00+00:00,Won,Orlando Magic 132 - 120 Minnesota Timberwolves
+2624,Utah Jazz vs Memphis Grizzlies,Memphis Grizzlies,Spread,2.5,2026-04-11 01:30:00+00:00,Lost,Utah Jazz 147 - 101 Memphis Grizzlies
+2625,San Antonio Spurs vs Dallas Mavericks,San Antonio Spurs,Spread,-18.5,2026-04-11 00:00:00+00:00,Won,San Antonio Spurs 139 - 120 Dallas Mavericks
