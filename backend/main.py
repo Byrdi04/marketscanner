@@ -18,6 +18,7 @@ import json
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 
 app = FastAPI()
 
@@ -51,6 +52,7 @@ def run_scheduled_scan():
     # This automatically calls our new log_paper_bets function
     opportunities = run_analysis(danske, pinnacle)
     log_paper_bets(opportunities)
+    check_and_notify(opportunities)
     
     print(f"✅ Scheduled Scan Complete. Processed {len(opportunities)} opps.")
 
@@ -242,6 +244,256 @@ def extract_decimal(price_data):
     if isinstance(val, dict):
         return float(val.get('parsedValue'))
     return float(val)
+
+# ---------------------------------------------------------
+# NOTIFICATION SYSTEM
+# ---------------------------------------------------------
+
+def load_notification_config():
+    """Loads global notification settings from DB."""
+    defaults = {
+        "enabled": "false",
+        "ntfy_topic": NTFY_TOPIC or "",
+        "cooldown_minutes": "120",
+    }
+
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM notification_config")
+        rows = cursor.fetchall()
+        conn.close()
+
+        config = dict(rows) if rows else {}
+
+        for key, default_val in defaults.items():
+            if key not in config:
+                config[key] = default_val
+
+        return config
+    except Exception as e:
+        print(f"Error loading notification config: {e}")
+        return defaults
+
+def save_notification_config(config_dict):
+    """Upserts all config key/value pairs to DB."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        for key, value in config_dict.items():
+            cursor.execute(
+                "INSERT OR REPLACE INTO notification_config (key, value) VALUES (?, ?)",
+                (key, str(value))
+            )
+        conn.commit()
+        conn.close()
+        print("Notification config saved.")
+    except Exception as e:
+        print(f"Error saving notification config: {e}")
+
+def load_notification_rules():
+    """Loads both notification rules from DB."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notification_rules ORDER BY rule_number ASC")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Error loading notification rules: {e}")
+        return []
+
+
+def save_notification_rules(rules):
+    """Saves both notification rules to DB."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        for rule in rules:
+            cursor.execute('''
+                UPDATE notification_rules SET
+                    enabled = ?,
+                    min_ev = ?,
+                    min_odds = ?,
+                    max_odds = ?,
+                    market_types = ?,
+                    min_minutes = ?,
+                    max_minutes = ?
+                WHERE rule_number = ?
+            ''', (
+                rule['enabled'],
+                rule['min_ev'],
+                rule['min_odds'],
+                rule['max_odds'],
+                rule['market_types'],
+                rule.get('min_minutes'),
+                rule.get('max_minutes'),
+                rule['rule_number'],
+            ))
+        conn.commit()
+        conn.close()
+        print("Notification rules saved.")
+    except Exception as e:
+        print(f"Error saving notification rules: {e}")
+
+def send_ntfy_notification(title, message, topic):
+    """Sends a push notification via Ntfy.sh."""
+    try:
+        response = requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=message.encode("utf-8"),
+            headers={
+                "Title": title,
+                "Priority": "high",
+                "Tags": "basketball",
+            }
+        )
+        if response.ok:
+            print(f"✅ Notification sent to topic '{topic}'")
+        else:
+            print(f"❌ Ntfy error: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Failed to send notification: {e}")
+
+
+def check_and_notify(opportunities):
+    """
+    Filters opportunities against notification rules,
+    checks deduplication, and sends qualifying bets.
+    """
+    try:
+        config = load_notification_config()
+
+        # 1. Is the system enabled?
+        if config.get("enabled", "false") != "true":
+            return
+
+        topic = config.get("ntfy_topic", "")
+        if not topic:
+            print("⚠️ Notifications enabled but no topic configured.")
+            return
+
+        cooldown_minutes = int(config.get("cooldown_minutes", "120"))
+
+        # 2. Load rules
+        rules = load_notification_rules()
+        active_rules = [r for r in rules if r.get('enabled') == 'true']
+
+        if not active_rules:
+            return
+
+        # 3. Check each opportunity against each rule
+        qualifying = {}  # Use dict keyed by opp id to deduplicate across rules
+        now = datetime.now()
+
+        for opp in opportunities:
+            if opp["id"] in qualifying:
+                continue  # Already matched by another rule
+
+            for rule in active_rules:
+                # A. EV check
+                if opp["ev"] < rule["min_ev"]:
+                    continue
+
+                # B. Odds range check
+                if opp["danske_odds"] < rule["min_odds"]:
+                    continue
+                if opp["danske_odds"] > rule["max_odds"]:
+                    continue
+
+                # C. Market type check
+                allowed_markets = [m.strip() for m in rule["market_types"].split(",")]
+                if opp["type"] not in allowed_markets:
+                    continue
+
+                # D. Time window check
+                if rule["min_minutes"] is not None and rule["max_minutes"] is not None:
+                    try:
+                        commence = datetime.fromisoformat(
+                            opp["commence_time"].replace('Z', '+00:00')
+                        )
+                        now_utc = datetime.now(pytz.utc)
+                        minutes_until = (commence - now_utc).total_seconds() / 60
+
+                        if minutes_until < rule["min_minutes"]:
+                            continue
+                        if minutes_until > rule["max_minutes"]:
+                            continue
+                    except Exception:
+                        continue  # If time parsing fails, skip this check
+
+                # Passed all filters for this rule
+                qualifying[opp["id"]] = opp
+                break  # No need to check other rules for this opp
+
+        if not qualifying:
+            return
+
+        # 4. Check deduplication
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        to_notify = []
+
+        for opp in qualifying.values():
+            cursor.execute(
+                "SELECT danske_odds, ev_percent, notified_at FROM notification_log "
+                "WHERE bet_key = ? ORDER BY id DESC LIMIT 1",
+                (opp["id"],)
+            )
+            row = cursor.fetchone()
+
+            if row is None:
+                to_notify.append(opp)
+            else:
+                last_odds, last_ev, last_notified_str = row
+                last_notified = datetime.fromisoformat(last_notified_str)
+                minutes_since = (now - last_notified).total_seconds() / 60
+
+                odds_changed = abs(opp["danske_odds"] - last_odds) >= 0.02
+
+                if odds_changed:
+                    to_notify.append(opp)
+                elif minutes_since >= cooldown_minutes:
+                    to_notify.append(opp)
+
+        if not to_notify:
+            conn.close()
+            return
+
+        # 5. Build the notification message (batched)
+        lines = []
+        for opp in to_notify:
+            line = (
+                f"{opp['match']}\n"
+                f"  {opp['selection']}"
+                + (f" ({opp['line']})" if opp['line'] else "")
+                + f" ({opp['type']})\n"
+                f"  Danske: {opp['danske_odds']:.2f} | Fair: {opp['fair_odds']:.2f} | EV: +{opp['ev']:.1f}%"
+            )
+            lines.append(line)
+
+        title = f"{len(to_notify)} Edge{'s' if len(to_notify) > 1 else ''} Found"
+        message = "\n\n".join(lines)
+
+        # 6. Send the notification
+        send_ntfy_notification(title, message, topic)
+
+        # 7. Log all notified bets
+        for opp in to_notify:
+            cursor.execute(
+                "INSERT INTO notification_log (bet_key, danske_odds, ev_percent) VALUES (?, ?, ?)",
+                (opp["id"], opp["danske_odds"], opp["ev"])
+            )
+
+        conn.commit()
+        conn.close()
+
+        print(f"📱 Notified about {len(to_notify)} bets.")
+
+    except Exception as e:
+        print(f"❌ Error in check_and_notify: {e}")
 
 # ---------------------------------------------------------
 # 2. DATA FETCHING: PINNACLE (Quota Management)
@@ -540,7 +792,7 @@ def init_db():
         )
     ''')
 
-    # 2. NEW TABLE: MARKET SNAPSHOTS
+    # 2. TABLE: MARKET SNAPSHOTS
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS market_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -549,7 +801,7 @@ def init_db():
         )
     ''')
 
-    # 3. NEW TABLE: PAPER BETS
+    # 3. TABLE: PAPER BETS
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS paper_bets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -570,7 +822,42 @@ def init_db():
         )
     ''')
 
-    # 4. INDICES
+    # 4. NOTIFICATION CONFIG
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notification_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT UNIQUE,
+            value TEXT
+        )
+    ''')
+
+    # 5. NOTIFICATION LOG
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notification_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bet_key TEXT,
+            danske_odds REAL,
+            ev_percent REAL,
+            notified_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 5.5 NOTIFICATION RULES
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notification_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_number INTEGER UNIQUE,
+            enabled TEXT DEFAULT 'false',
+            min_ev REAL DEFAULT 3.5,
+            min_odds REAL DEFAULT 1.60,
+            max_odds REAL DEFAULT 2.50,
+            market_types TEXT DEFAULT 'Spread,Total,MoneyLine',
+            min_minutes INTEGER,
+            max_minutes INTEGER
+        )
+    ''')
+
+    # 6. INDICES
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_match ON paper_bets(match_name)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_time ON paper_bets(timestamp)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_snapshots_time ON market_snapshots(timestamp)')
@@ -578,6 +865,74 @@ def init_db():
     conn.commit()
     conn.close()
     print("Database tables and indices checked/created.")
+
+def migrate_to_rules():
+    """
+    One-time migration: moves per-bet filters from notification_config
+    into the new notification_rules table. Runs safely on every startup.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 1. Check if rules already exist
+    cursor.execute("SELECT COUNT(*) FROM notification_rules")
+    count = cursor.fetchone()[0]
+
+    if count > 0:
+        conn.close()
+        return  # Already migrated
+
+    print("🔄 Migrating notification config to rules...")
+
+    # 2. Read existing config values (if any)
+    cursor.execute("SELECT key, value FROM notification_config")
+    old_config = dict(cursor.fetchall()) if cursor.fetchall else {}
+    
+    # Re-read because fetchall consumed the cursor
+    cursor.execute("SELECT key, value FROM notification_config")
+    rows = cursor.fetchall()
+    old_config = dict(rows) if rows else {}
+
+    # 3. Insert Rule 1 (from existing config or defaults)
+    cursor.execute('''
+        INSERT INTO notification_rules 
+        (rule_number, enabled, min_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        1,
+        'true',
+        float(old_config.get('min_ev', '3.5')),
+        float(old_config.get('min_odds', '1.60')),
+        float(old_config.get('max_odds', '2.50')),
+        old_config.get('market_types', 'Spread,Total,MoneyLine'),
+        None,  # No time filter
+        None,
+    ))
+
+    # 4. Insert Rule 2 (disabled defaults)
+    cursor.execute('''
+        INSERT INTO notification_rules 
+        (rule_number, enabled, min_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        2,
+        'false',
+        5.0,
+        1.60,
+        2.50,
+        'Spread,Total,MoneyLine',
+        None,
+        None,
+    ))
+
+    # 5. Clean up old per-bet keys from notification_config
+    old_keys = ['min_ev', 'min_odds', 'max_odds', 'market_types']
+    for key in old_keys:
+        cursor.execute("DELETE FROM notification_config WHERE key = ?", (key,))
+
+    conn.commit()
+    conn.close()
+    print("✅ Migration complete. 2 rules created.")
 
 # Helper funktion to save snapshot data to database
 def save_snapshot_to_db(clean_data):
@@ -775,6 +1130,7 @@ print("⚖️ Daily Settlement scheduled for 05:00 AM.")
 
 # Run this on startup
 init_db()
+migrate_to_rules()  # One-time migration to rule-based notifications
 restore_clv_jobs() # Restore jobs if server restarts
 
 class BetRequest(BaseModel):
@@ -787,6 +1143,21 @@ class BetRequest(BaseModel):
     ev_percent: float
     stake: float
     commence_time: str
+
+class NotificationConfig(BaseModel):
+    enabled: bool
+    ntfy_topic: str
+    cooldown_minutes: int
+
+class NotificationRule(BaseModel):
+    rule_number: int
+    enabled: bool
+    min_ev: float
+    min_odds: float
+    max_odds: float
+    market_types: list[str]
+    min_minutes: Optional[int] = None
+    max_minutes: Optional[int] = None
 
 # ---------------------------------------------------------
 # 5. API ENDPOINT
@@ -1009,6 +1380,112 @@ def get_analytics():
         },
         "chart_data": chart_data
     }
+
+# ---------------------------------------------------------
+# NOTIFICATION ENDPOINTS
+# ---------------------------------------------------------
+
+@app.get("/api/notification-settings")
+def get_notification_settings():
+    config = load_notification_config()
+
+    # Fetch recent notification log (last 20 entries)
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM notification_log ORDER BY id DESC LIMIT 20"
+        )
+        log_rows = cursor.fetchall()
+        conn.close()
+        recent_log = [dict(row) for row in log_rows]
+    except Exception as e:
+        print(f"Error fetching notification log: {e}")
+        recent_log = []
+
+    return {
+        "config": config,
+        "recent_log": recent_log
+    }
+
+
+@app.post("/api/notification-settings")
+def post_notification_settings(config: NotificationConfig):
+    try:
+        save_dict = {
+            "enabled": "true" if config.enabled else "false",
+            "ntfy_topic": config.ntfy_topic.strip(),
+            "cooldown_minutes": str(config.cooldown_minutes),
+        }
+        save_notification_config(save_dict)
+        return {"message": "Settings saved successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/notification-rules")
+def get_notification_rules():
+    rules = load_notification_rules()
+    # Convert market_types from comma string to list for frontend
+    for rule in rules:
+        rule["market_types"] = [
+            m.strip() for m in rule.get("market_types", "").split(",") if m.strip()
+        ]
+    return {"rules": rules}
+
+
+@app.post("/api/notification-rules")
+def post_notification_rules(rules: list[NotificationRule]):
+    try:
+        save_list = []
+        for rule in rules:
+            save_list.append({
+                "rule_number": rule.rule_number,
+                "enabled": "true" if rule.enabled else "false",
+                "min_ev": rule.min_ev,
+                "min_odds": rule.min_odds,
+                "max_odds": rule.max_odds,
+                "market_types": ",".join(rule.market_types),
+                "min_minutes": rule.min_minutes,
+                "max_minutes": rule.max_minutes,
+            })
+        save_notification_rules(save_list)
+        return {"message": "Rules saved successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/test-notification")
+def test_notification():
+    config = load_notification_config()
+    topic = config.get("ntfy_topic", "")
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="No Ntfy topic configured. Please save a topic first."
+        )
+
+    send_ntfy_notification(
+        title="Test: NBA Scanner",
+        message=(
+            "NBA Scanner is connected!\n\n"
+            "Example Edge:\n"
+            "Lakers vs Celtics\n"
+            "  Lakers +7.5 (Spread)\n"
+            "  Danske: 1.87 | Fair: 1.76 | EV: +4.2%"
+        ),
+        topic=topic
+    )
+
+    return {"message": "Test notification sent"}
+
+@app.post("/api/force-scan")
+def force_scan():
+    """Temporary endpoint to test the full scan + notify pipeline."""
+    run_scheduled_scan()
+    return {"message": "Scan complete"}
 
 # ---------------------------------------------------------
 # 5. SETTLEMENT LOGIC
