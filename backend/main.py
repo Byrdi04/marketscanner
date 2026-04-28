@@ -585,9 +585,16 @@ def update_clv_for_placed_bets(pinnacle_events):
     updates_made = 0
     pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
 
+    if not pinnacle_home_teams:
+        conn.close()
+        return
+
     for bet in pending_bets:
         # 1. Find the matching Pinnacle Event
-        match_name, score = process.extractOne(bet['match_name'].split(" vs ")[0], pinnacle_home_teams)
+        result = process.extractOne(bet['match_name'].split(" vs ")[0], pinnacle_home_teams)
+        if not result:
+            continue
+        match_name, score = result
         if score < 85: continue
 
         p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
@@ -653,8 +660,14 @@ def find_clv_for_paper_bet(bet_row):
     # We need to find the specific match and market in this old snapshot
     pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
     
+    if not pinnacle_home_teams:
+        return None
+    
     # Fuzzy match the team name
-    match_name, score = process.extractOne(bet_row['match_name'].split(" vs ")[0], pinnacle_home_teams)
+    result = process.extractOne(bet_row['match_name'].split(" vs ")[0], pinnacle_home_teams)
+    if not result:
+        return None
+    match_name, score = result
     if score < 85: return None
 
     p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
@@ -1036,7 +1049,7 @@ def log_paper_bets(opportunities):
         print(f"📝 Logged {count_new} new/changed Paper Bets.")
 
 
-def settle_paper_bets():
+def settle_paper_bets(scores_data=None):
     """
     Background task: Grades all pending PAPER bets.
     Reuses the existing grade_bet logic since column names are identical.
@@ -1055,8 +1068,9 @@ def settle_paper_bets():
         conn.close()
         return
 
-    # 2. Get Scores (Uses your existing function)
-    scores_data = fetch_nba_scores()
+    # 2. Get Scores (reuse if passed in, otherwise fetch fresh)
+    if not scores_data:
+        scores_data = fetch_nba_scores()
     if not scores_data:
         print("Could not fetch scores for settlement.")
         conn.close()
@@ -1283,8 +1297,8 @@ def settle_bets():
     conn.commit()
     conn.close()
 
-    # Trigger Paper Settlement too <<<
-    settle_paper_bets()
+    # Trigger Paper Settlement too (reuse the scores we already fetched)
+    settle_paper_bets(scores_data=scores_data)
     
     return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
 
@@ -1490,7 +1504,117 @@ def force_scan():
 # ---------------------------------------------------------
 # 5. SETTLEMENT LOGIC
 # ---------------------------------------------------------
+
+
+# Team name corrections: maps names from Pinnacle/Danske to official NBA API names
+# Add entries here if you encounter "not found" issues during settlement
+NBA_TEAM_NAME_MAP = {
+    # "Pinnacle/Danske name": "Official NBA API name",
+}
+
+def fetch_nba_scores_official(days_back=3):
+    """
+    Fetches NBA scores using the official NBA API.
+    Returns data in the same format as fetch_nba_scores() so grade_bet() needs no changes.
+    """
+    from nba_api.stats.endpoints import leaguegamefinder
+    import time as time_module
+
+    print("🏀 Fetching scores via NBA API...")
+
+    try:
+        # 1. Build the list of dates to query (last N days in Eastern Time)
+        et_tz = pytz.timezone("America/New_York")
+        today_et = datetime.now(et_tz)
+        dates_to_check = [
+            (today_et - timedelta(days=i)).strftime("%m/%d/%Y")
+            for i in range(days_back)
+        ]
+
+        all_games = []
+
+        for date_str in dates_to_check:
+            print(f"  Querying NBA API for {date_str}...")
+            try:
+                result = leaguegamefinder.LeagueGameFinder(
+                    date_from_nullable=date_str,
+                    date_to_nullable=date_str,
+                    league_id_nullable="00",  # 00 = NBA
+                )
+                api_df = result.get_data_frames()[0]
+            except Exception as e:
+                print(f"  ⚠️ NBA API call failed for {date_str}: {e}")
+                time_module.sleep(1)
+                continue
+
+            if api_df.empty:
+                print(f"  No games found for {date_str}")
+                time_module.sleep(1)
+                continue
+
+            # 2. Group by GAME_ID to pair home/away teams
+            for game_id, group in api_df.groupby("GAME_ID"):
+                if len(group) != 2:
+                    continue  # Should always be 2 teams, skip if not
+
+                # WL column: 'W' or 'L'
+                # MATCHUP column: 'Team A vs. Team B' (home) or 'Team A @ Team B' (away)
+                home_row = group[group["MATCHUP"].str.contains("vs.")].iloc[0] if not group[group["MATCHUP"].str.contains("vs.")].empty else None
+                away_row = group[group["MATCHUP"].str.contains("@")].iloc[0] if not group[group["MATCHUP"].str.contains("@")].empty else None
+
+                if home_row is None or away_row is None:
+                    continue
+
+                # 3. Format to match The Odds API format that grade_bet() expects
+                all_games.append({
+                    "home_team": str(home_row["TEAM_NAME"]),
+                    "away_team": str(away_row["TEAM_NAME"]),
+                    "completed": True,  # LeagueGameFinder only returns completed games
+                    "scores": [
+                        {"name": str(home_row["TEAM_NAME"]), "score": str(int(home_row["PTS"]))},
+                        {"name": str(away_row["TEAM_NAME"]), "score": str(int(away_row["PTS"]))},
+                    ]
+                })
+
+            time_module.sleep(1)  # Respect NBA API rate limit
+
+        print(f"🏀 NBA API returned {len(all_games)} completed games.")
+        return all_games
+
+    except Exception as e:
+        print(f"❌ NBA API fetch failed entirely: {e}")
+        return []
+
+
 def fetch_nba_scores():
+    """
+    Fetches NBA scores for settlement.
+
+    Strategy:
+    1. Try official NBA API first (free, authoritative, slower)
+    2. Fall back to The Odds API if NBA API fails or returns no data
+    """
+    # 1. Try NBA API first
+    scores = fetch_nba_scores_official(days_back=3)
+    if scores:
+        return scores
+
+    # 2. Fall back to The Odds API
+    print("⚠️ NBA API returned no data. Falling back to Odds API...")
+    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/scores"
+    params = {
+        "apiKey": API_KEY,
+        "daysFrom": 3,
+        "dateFormat": "iso"
+    }
+    try:
+        resp = requests.get(url, params=params)
+        resp.raise_for_status()
+        print("✅ Fallback to Odds API successful.")
+        return resp.json()
+    except Exception as e:
+        print(f"❌ Odds API fallback also failed: {e}")
+        return []
     """Fetches scores for the last 3 days from The Odds API"""
     # Note: 'daysFrom' allows us to look back at completed games
     url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/scores'
