@@ -204,6 +204,7 @@ def parse_danske_spil(json_response):
             "home_team": home_team_name,
             "away_team": away_team_name,
             "commence_time": event.get('startTime'),
+            "league": "NBA",
             "markets": [] 
         }
         
@@ -759,6 +760,8 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
             ev_percent = (d_odds * fair_prob) - 1
 
             if ev_percent > -0.05: # Return anything better than -5% EV
+                # Determine league from the event data, default to 'NBA'
+                league = d_event.get('league', 'NBA')
                 results.append({
                     "id": f"{d_event['home_team']}-{d_market['type']}-{d_selection}-{d_line}", # Unique key for React
                     "event_id": d_event['id'],
@@ -769,7 +772,8 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
                     "line": d_line,
                     "danske_odds": d_odds,
                     "fair_odds": round(1/fair_prob, 2) if fair_prob > 0 else 0,
-                    "ev": round(ev_percent * 100, 2)
+                    "ev": round(ev_percent * 100, 2),
+                    "league": league
                 })
 
     return sorted(results, key=lambda x: x['ev'], reverse=True)
@@ -831,6 +835,7 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'Pending',
             result_score TEXT,
+            league TEXT DEFAULT 'NBA',
             FOREIGN KEY(snapshot_id) REFERENCES market_snapshots(id)
         )
     ''')
@@ -878,6 +883,22 @@ def init_db():
     conn.commit()
     conn.close()
     print("Database tables and indices checked/created.")
+
+    # Migration: Add league column to paper_bets if missing (for existing DBs)
+    _migrate_add_league_column()
+
+def _migrate_add_league_column():
+    """Add league column to paper_bets if it doesn't exist yet."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("ALTER TABLE paper_bets ADD COLUMN league TEXT DEFAULT 'NBA'")
+        conn.commit()
+        print("✅ Migration: Added league column to paper_bets.")
+        conn.close()
+    except sqlite3.OperationalError:
+        # Column already exists — no problem
+        pass
 
 def migrate_to_rules():
     """
@@ -1025,11 +1046,13 @@ def log_paper_bets(opportunities):
 
         # 4. INSERT if not duplicate
         if not is_duplicate:
+            # Determine league — for now hardcoded to NBA, expandable later
+            league = op.get('league', 'NBA')
             cursor.execute('''
                 INSERT INTO paper_bets (
                     snapshot_id, match_name, selection, market_type, 
-                    handicap, danske_odds, pinnacle_odds, ev_percent, commence_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    handicap, danske_odds, pinnacle_odds, ev_percent, commence_time, league
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 current_snapshot_id,
                 op['match'],
@@ -1039,7 +1062,8 @@ def log_paper_bets(opportunities):
                 op['danske_odds'],
                 op['fair_odds'], # We store the "Fair" price as our benchmark
                 op['ev'],
-                op['commence_time']
+                op['commence_time'],
+                league
             ))
             count_new += 1
 
