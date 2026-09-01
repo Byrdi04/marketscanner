@@ -62,6 +62,7 @@ def temporal_split(df: pd.DataFrame, split_frac: float = SPLIT_FRACTION):
 def build_model(
     dedup: str = "match_selection",
     min_ev: float = 0.0,
+    max_ev: float = 1e9,
     min_minutes: float = 0.0,
     max_minutes: float = 1e9,
     min_odds: float = 1.0,
@@ -72,7 +73,7 @@ def build_model(
         return base
 
     df = _add_features(load_settled())
-    used, meta = apply_view(df, dedup, min_ev, min_minutes, max_minutes, min_odds, max_odds)
+    used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
     if len(used) < 60:
         return {**base, "error": "Need ≥ 60 settled bets in this view to fit the model.", "meta": meta}
 
@@ -186,6 +187,8 @@ def build_model(
 
 def build_sweep(
     dedup: str = "match_selection",
+    max_ev: float = 1e9,
+    max_hours: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 1e9,
     ev_grid=(0.0, 0.5, 1.0, 2.0, 3.0, 5.0),
@@ -199,13 +202,20 @@ def build_sweep(
         return base
 
     df = _add_features(load_settled())
-    used, meta = apply_view(df, dedup, min_odds=min_odds, max_odds=max_odds)
+    used, meta = apply_view(
+        df, dedup, max_ev=max_ev, max_minutes=max_hours * 60.0,
+        min_odds=min_odds, max_odds=max_odds,
+    )
     train, holdout, cutoff = temporal_split(used, split_frac)
     months = max(float(_months_span(holdout)), 0.1)
 
     rows = []
     for ev in ev_grid:
+        if ev > max_ev:
+            continue
         for h in hours_grid:
+            if h > max_hours:
+                continue
             sub = holdout[(holdout["ev_percent"] >= ev) & (holdout["hours_to_start"] >= h)]
             if len(sub) < min_n:
                 continue

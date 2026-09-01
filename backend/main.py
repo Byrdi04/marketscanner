@@ -1441,6 +1441,7 @@ def get_analytics():
 def get_strategy_analysis(
     dedup: str = "match_selection",
     min_ev: float = 0.0,
+    max_ev: float = 1e9,
     min_minutes: float = 0.0,
     max_minutes: float = 100000.0,
     min_odds: float = 1.0,
@@ -1451,6 +1452,7 @@ def get_strategy_analysis(
     return build_evidence(
         dedup=dedup,
         min_ev=min_ev,
+        max_ev=max_ev,
         min_minutes=min_minutes,
         max_minutes=max_minutes,
         min_odds=min_odds,
@@ -1461,6 +1463,7 @@ def get_strategy_analysis(
 def get_strategy_model(
     dedup: str = "match_selection",
     min_ev: float = 0.0,
+    max_ev: float = 1e9,
     min_minutes: float = 0.0,
     max_minutes: float = 100000.0,
     min_odds: float = 1.0,
@@ -1471,6 +1474,7 @@ def get_strategy_model(
     return build_model(
         dedup=dedup,
         min_ev=min_ev,
+        max_ev=max_ev,
         min_minutes=min_minutes,
         max_minutes=max_minutes,
         min_odds=min_odds,
@@ -1480,6 +1484,8 @@ def get_strategy_model(
 @app.get("/api/strategy-sweep")
 def get_strategy_sweep(
     dedup: str = "match_selection",
+    max_ev: float = 1e9,
+    max_hours: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 100.0,
 ):
@@ -1487,6 +1493,8 @@ def get_strategy_sweep(
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
     return build_sweep(
         dedup=dedup,
+        max_ev=max_ev,
+        max_hours=max_hours,
         min_odds=min_odds,
         max_odds=max_odds,
     )

@@ -144,7 +144,9 @@ export default function StrategyPage() {
   const [error, setError] = useState<string | null>(null);
   const [dedup, setDedup] = useState<string>("match_selection");
   const [minEv, setMinEv] = useState(0);
+  const [maxEv, setMaxEv] = useState(10);
   const [minHours, setMinHours] = useState(0);
+  const [maxHours, setMaxHours] = useState(23);
   const [minOdds, setMinOdds] = useState(1.9);
   const [maxOdds, setMaxOdds] = useState(2.4);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,8 +156,9 @@ export default function StrategyPage() {
     const base = {
       dedup,
       min_ev: String(minEv),
+      max_ev: String(maxEv),
       min_minutes: String(minHours * 60),
-      max_minutes: "100000",
+      max_minutes: String(maxHours * 60),
       min_odds: String(minOdds),
       max_odds: String(maxOdds),
     };
@@ -163,9 +166,9 @@ export default function StrategyPage() {
     return {
       evidence: `/api/strategy-analysis?${q.toString()}`,
       model: `/api/strategy-model?${q.toString()}`,
-      sweep: `/api/strategy-sweep?${new URLSearchParams({ dedup, min_odds: String(minOdds), max_odds: String(maxOdds) }).toString()}`,
+      sweep: `/api/strategy-sweep?${new URLSearchParams({ dedup, max_ev: String(maxEv), max_hours: String(maxHours), min_odds: String(minOdds), max_odds: String(maxOdds) }).toString()}`,
     };
-  }, [dedup, minEv, minHours, minOdds, maxOdds]);
+  }, [dedup, minEv, maxEv, minHours, maxHours, minOdds, maxOdds]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -236,7 +239,7 @@ export default function StrategyPage() {
 
         {/* CONTROLS */}
         <section className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
             <label className="block">
               <span className="text-xs uppercase font-semibold text-gray-500">Dedup (correlated bets)</span>
               <select
@@ -256,7 +259,18 @@ export default function StrategyPage() {
               </span>
               <input
                 type="range" min={0} max={10} step={0.5} value={minEv}
-                onChange={(e) => setMinEv(Number(e.target.value))}
+                onChange={(e) => setMinEv(Math.min(Number(e.target.value), maxEv))}
+                className="w-full mt-2 accent-blue-600"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase font-semibold text-gray-500">
+                Max EV: <b>{maxEv}%</b>
+              </span>
+              <input
+                type="range" min={0} max={10} step={0.5} value={maxEv}
+                onChange={(e) => setMaxEv(Math.max(Number(e.target.value), minEv))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>
@@ -267,7 +281,18 @@ export default function StrategyPage() {
               </span>
               <input
                 type="range" min={0} max={23} step={1} value={minHours}
-                onChange={(e) => setMinHours(Number(e.target.value))}
+                onChange={(e) => setMinHours(Math.min(Number(e.target.value), maxHours))}
+                className="w-full mt-2 accent-blue-600"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase font-semibold text-gray-500">
+                Bet placed ≤ <b>{maxHours}h</b> before start
+              </span>
+              <input
+                type="range" min={0} max={23} step={1} value={maxHours}
+                onChange={(e) => setMaxHours(Math.max(Number(e.target.value), minHours))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>

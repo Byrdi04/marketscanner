@@ -93,6 +93,7 @@ def apply_view(
     df: pd.DataFrame,
     dedup: str = "match_selection",
     min_ev: float = 0.0,
+    max_ev: float = 1e9,
     min_minutes: float = 0.0,
     max_minutes: float = 1e9,
     min_odds: float = 1.0,
@@ -122,6 +123,7 @@ def apply_view(
     before_filter = len(used)
     used = used[
         (used["ev_percent"] >= min_ev)
+        & (used["ev_percent"] <= max_ev)
         & (used["minutes_to_start"] >= min_minutes)
         & (used["minutes_to_start"] <= max_minutes)
         & (used["danske_odds"] >= min_odds)
@@ -250,13 +252,14 @@ def correlations(df: pd.DataFrame) -> list:
 def build_evidence(
     dedup: str = "match_selection",
     min_ev: float = 0.0,
+    max_ev: float = 1e9,
     min_minutes: float = 0.0,
     max_minutes: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 1e9,
 ) -> dict:
     df = load_settled()
-    used, meta = apply_view(df, dedup, min_ev, min_minutes, max_minutes, min_odds, max_odds)
+    used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
 
     months = _months_span(used)
     overall = None
