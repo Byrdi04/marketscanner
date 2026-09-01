@@ -17,6 +17,7 @@ interface PaperBet {
   result_score: string | null;
   timestamp: string;
   league?: string;
+  commence_time?: string;
 }
 
 interface FilterState {
@@ -30,6 +31,10 @@ interface FilterState {
   dateTo: string;
   minOdds: string;
   maxOdds: string;
+  minHoursToStart: string;
+  maxHoursToStart: string;
+  minClv: string;
+  maxClv: string;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -43,6 +48,10 @@ const DEFAULT_FILTERS: FilterState = {
   dateTo: "",
   minOdds: "",
   maxOdds: "",
+  minHoursToStart: "",
+  maxHoursToStart: "",
+  minClv: "",
+  maxClv: "",
 };
 
 function getDropdownOptions(bets: PaperBet[]) {
@@ -89,6 +98,37 @@ function applyFilters(bets: PaperBet[], filters: FilterState): PaperBet[] {
     if (filters.maxOdds !== "") {
       const max = parseFloat(filters.maxOdds);
       if (!isNaN(max) && b.danske_odds > max) return false;
+    }
+
+    // Time to game start filter (hours between bet found and game start)
+    if (b.commence_time && (filters.minHoursToStart !== "" || filters.maxHoursToStart !== "")) {
+      const betTime = new Date(b.timestamp).getTime();
+      const gameTime = new Date(b.commence_time).getTime();
+      const hoursToStart = (gameTime - betTime) / (1000 * 60 * 60);
+      if (filters.minHoursToStart !== "") {
+        const min = parseFloat(filters.minHoursToStart);
+        if (!isNaN(min) && hoursToStart < min) return false;
+      }
+      if (filters.maxHoursToStart !== "") {
+        const max = parseFloat(filters.maxHoursToStart);
+        if (!isNaN(max) && hoursToStart > max) return false;
+      }
+    }
+
+    // CLV range filter (based on danske_odds / closing_odds - 1)
+    if ((filters.minClv !== "" || filters.maxClv !== "") && b.closing_odds) {
+      const clvPercent = ((b.danske_odds / b.closing_odds) - 1) * 100;
+      if (filters.minClv !== "") {
+        const min = parseFloat(filters.minClv);
+        if (!isNaN(min) && clvPercent < min) return false;
+      }
+      if (filters.maxClv !== "") {
+        const max = parseFloat(filters.maxClv);
+        if (!isNaN(max) && clvPercent > max) return false;
+      }
+    } else if (filters.minClv !== "" || filters.maxClv !== "") {
+      // Bet has no closing odds but a CLV filter is active — exclude it
+      return false;
     }
 
     return true;
@@ -167,7 +207,7 @@ export default function PaperTrading() {
   };
 
   const filterCount = Object.entries(filters).filter(([key, val]) => {
-    if (["search", "minEv", "maxEv", "minOdds", "maxOdds", "dateFrom", "dateTo"].includes(key)) return val !== "";
+    if (["search", "minEv", "maxEv", "minOdds", "maxOdds", "dateFrom", "dateTo", "minHoursToStart", "maxHoursToStart", "minClv", "maxClv"].includes(key)) return val !== "";
     return val !== "All" && val !== "";
   }).length;
 
@@ -368,6 +408,50 @@ export default function PaperTrading() {
                   className={inputClass + " w-16"}
                   value={filters.maxOdds}
                   onChange={e => setFilter("maxOdds", e.target.value)}
+                />
+              </div>
+
+              {/* Hours to Game Start */}
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Game In (h)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="Min"
+                  className={inputClass + " w-14"}
+                  value={filters.minHoursToStart}
+                  onChange={e => setFilter("minHoursToStart", e.target.value)}
+                />
+                <span className="text-[10px] text-gray-300">–</span>
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="Max"
+                  className={inputClass + " w-14"}
+                  value={filters.maxHoursToStart}
+                  onChange={e => setFilter("maxHoursToStart", e.target.value)}
+                />
+              </div>
+
+              {/* CLV Range */}
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">CLV %</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder="Min"
+                  className={inputClass + " w-14"}
+                  value={filters.minClv}
+                  onChange={e => setFilter("minClv", e.target.value)}
+                />
+                <span className="text-[10px] text-gray-300">–</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder="Max"
+                  className={inputClass + " w-14"}
+                  value={filters.maxClv}
+                  onChange={e => setFilter("maxClv", e.target.value)}
                 />
               </div>
             </div>
