@@ -2,23 +2,13 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { StrategyRule, DEFAULT_RULE_VALUES, normalizeRule } from "../rules";
 
 interface GlobalConfig {
   enabled: boolean;
   ntfy_topic: string;
   cooldown_minutes: number;
   paper_bets_limit: number;
-}
-
-interface NotificationRule {
-  rule_number: number;
-  enabled: boolean;
-  min_ev: number;
-  min_odds: number;
-  max_odds: number;
-  market_types: string[];
-  min_minutes: number | null;
-  max_minutes: number | null;
 }
 
 interface NotificationLogEntry {
@@ -31,28 +21,14 @@ interface NotificationLogEntry {
 
 const ALL_MARKET_TYPES = ["Spread", "Total", "MoneyLine"];
 
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
 const TIME_OPTIONS = [
-  { label: "15 min", value: 15 },
-  { label: "30 min", value: 30 },
-  { label: "1h", value: 60 },
-  { label: "2h", value: 120 },
-  { label: "3h", value: 180 },
-  { label: "6h", value: 360 },
-  { label: "12h", value: 720 },
-  { label: "24h", value: 1440 },
-  { label: "48h", value: 2880 },
+  { label: "15 min", value:  15 },
+  { label: "30 min", value:  30 },
+  ...HOUR_OPTIONS.map((h) => ({ label: h === 0 ? "0 min" : `${h}h`, value: h * 60 })),
+  { label: "24h", value:  1440 },
+  { label: "48h", value:  2880 },
 ];
-
-const DEFAULT_RULE: NotificationRule = {
-  rule_number: 1,
-  enabled: false,
-  min_ev: 3.5,
-  min_odds: 1.60,
-  max_odds: 2.50,
-  market_types: ["Spread", "Total", "MoneyLine"],
-  min_minutes: null,
-  max_minutes: null,
-};
 
 export default function Settings() {
   // Global settings
@@ -64,9 +40,9 @@ export default function Settings() {
   });
 
   // Rules
-  const [rules, setRules] = useState<NotificationRule[]>([
-    { ...DEFAULT_RULE, rule_number: 1 },
-    { ...DEFAULT_RULE, rule_number: 2 },
+  const [rules, setRules] = useState<StrategyRule[]>([
+    { ...DEFAULT_RULE_VALUES, rule_number: 1 },
+    { ...DEFAULT_RULE_VALUES, rule_number: 2 },
   ]);
 
   // Log
@@ -97,19 +73,11 @@ export default function Settings() {
       const rulesRes = await fetch("/api/notification-rules");
       const rulesJson = await rulesRes.json();
 
-      if (rulesJson.rules && rulesJson.rules.length === 2) {
-        setRules(
-          rulesJson.rules.map((r: any) => ({
-            rule_number: r.rule_number,
-            enabled: r.enabled === "true" || r.enabled === true,
-            min_ev: parseFloat(r.min_ev),
-            min_odds: parseFloat(r.min_odds),
-            max_odds: parseFloat(r.max_odds),
-            market_types: Array.isArray(r.market_types) ? r.market_types : [],
-            min_minutes: r.min_minutes,
-            max_minutes: r.max_minutes,
-          }))
-        );
+      if (Array.isArray(rulesJson.rules)) {
+        const parsed = rulesJson.rules
+          .map((r: any) => normalizeRule(r))
+          .filter(Boolean) as StrategyRule[];
+        if (parsed.length) setRules(parsed);
       }
     } catch (err) {
       console.error("Failed to fetch settings", err);
@@ -169,7 +137,7 @@ export default function Settings() {
 
   // ---- RULE HELPERS ----
 
-  const updateRule = (ruleNumber: number, updates: Partial<NotificationRule>) => {
+  const updateRule = (ruleNumber: number, updates: Partial<StrategyRule>) => {
     setRules((prev) =>
       prev.map((r) => (r.rule_number === ruleNumber ? { ...r, ...updates } : r))
     );
@@ -200,7 +168,7 @@ export default function Settings() {
 
   // ---- RENDER RULE CARD ----
 
-  const renderRuleCard = (rule: NotificationRule) => {
+  const renderRuleCard = (rule: StrategyRule) => {
     const hasTimeFilter = rule.min_minutes !== null && rule.max_minutes !== null;
 
     return (
@@ -214,7 +182,7 @@ export default function Settings() {
       >
         {/* Rule Header */}
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-gray-800">Rule {rule.rule_number}</h3>
+          <h3 className="font-semibold text-gray-800">{rule.name?.trim() || `Rule ${rule.rule_number}`}</h3>
           <button
             onClick={() => updateRule(rule.rule_number, { enabled: !rule.enabled })}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
@@ -242,6 +210,28 @@ export default function Settings() {
             value={rule.min_ev}
             onChange={(e) =>
               updateRule(rule.rule_number, { min_ev: parseFloat(e.target.value) })
+            }
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+          />
+          <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <span>0%</span>
+            <span>10%</span>
+          </div>
+        </div>
+
+        {/* Max EV */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Max EV: <span className="font-mono text-gray-900">{rule.max_ev}%</span>
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="10"
+            step="0.5"
+            value={rule.max_ev}
+            onChange={(e) =>
+              updateRule(rule.rule_number, { max_ev: parseFloat(e.target.value) })
             }
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
           />

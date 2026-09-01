@@ -6,6 +6,11 @@ import {
   ResponsiveContainer, BarChart, Bar, Cell, ErrorBar, XAxis, YAxis,
   Tooltip, ReferenceLine, CartesianGrid, LineChart, Line, Legend,
 } from "recharts";
+import {
+  StrategyRule, DEFAULT_RULE_VALUES, ruleDisplayName, ruleSummary, clamp,
+  RULE_EV_MIN, RULE_EV_MAX, RULE_HOUR_MIN, RULE_HOUR_MAX,
+  fetchRules, saveRules,
+} from "../rules";
 
 /* ------------------------------------------------------------------ */
 /* Types matching backend responses                                    */
@@ -149,6 +154,10 @@ export default function StrategyPage() {
   const [maxHours, setMaxHours] = useState(23);
   const [minOdds, setMinOdds] = useState(1.9);
   const [maxOdds, setMaxOdds] = useState(2.4);
+  const [rules, setRules] = useState<StrategyRule[]>([]);
+  const [activeRuleNumber, setActiveRuleNumber] = useState<number | null>(null);
+  const [ruleSaveState, setRuleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const rulesDirtyRef = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ------------------------------ fetching ----------------------------- */
@@ -199,6 +208,95 @@ export default function StrategyPage() {
     };
   }, [fetchData]);
 
+  /* ------------------------------ saved rules ------------------------------ */
+  useEffect(() => {
+    (async () => {
+      const r = await fetchRules();
+      setRules(r);
+      rulesDirtyRef.current = JSON.stringify(r);
+    })();
+  }, []);
+
+  const rulesDirty = useMemo(() => JSON.stringify(rules) !== rulesDirtyRef.current, [rules]);
+
+  const applyRule = (rule: StrategyRule) => {
+    setMinEv(clamp(rule.min_ev, RULE_EV_MIN, RULE_EV_MAX));
+    setMaxEv(clamp(rule.max_ev, RULE_EV_MIN, RULE_EV_MAX));
+    setMinHours(clamp(rule.min_minutes == null ? RULE_HOUR_MIN : Math.round(rule.min_minutes / 60), RULE_HOUR_MIN, RULE_HOUR_MAX));
+    setMaxHours(clamp(rule.max_minutes == null ? RULE_HOUR_MAX : Math.round(rule.max_minutes / 60), RULE_HOUR_MIN, RULE_HOUR_MAX));
+    setMinOdds(rule.min_odds);
+    setMaxOdds(rule.max_odds);
+    setActiveRuleNumber(rule.rule_number);
+  };
+
+  const changeMinEv = (raw: number) => {
+    const v = Math.min(clamp(raw, RULE_EV_MIN, RULE_EV_MAX), maxEv);
+    setMinEv(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, min_ev: v } : r));
+  };
+  const changeMaxEv = (raw: number) => {
+    const v = Math.max(clamp(raw, RULE_EV_MIN, RULE_EV_MAX), minEv);
+    setMaxEv(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, max_ev: v } : r));
+  };
+  const changeMinHours = (raw: number) => {
+    const v = Math.min(clamp(raw, RULE_HOUR_MIN, RULE_HOUR_MAX), maxHours);
+    setMinHours(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, min_minutes: v * 60 } : r));
+  };
+  const changeMaxHours = (raw: number) => {
+    const v = Math.max(clamp(raw, RULE_HOUR_MIN, RULE_HOUR_MAX), minHours);
+    setMaxHours(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, max_minutes: v * 60 } : r));
+  };
+  const changeMinOdds = (raw: number) => {
+    const v = raw;
+    setMinOdds(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, min_odds: v } : r));
+  };
+const changeMaxOdds = (raw: number) => {
+    const v = raw;
+    setMaxOdds(v);
+    if (activeRuleNumber != null) setRules((prev) => prev.map((r) => r.rule_number === activeRuleNumber ? { ...r, max_odds: v } : r));
+  };
+
+  const handleSaveAsNewRule = () => {
+    const name = window.prompt("Name this rule (optional):");
+    if (name == null) return;
+    const nextNumber = rules.reduce((mx, r) => Math.max(mx, r.rule_number), 0) + 1;
+    const newRule: StrategyRule = {
+      ...DEFAULT_RULE_VALUES,
+      rule_number: nextNumber,
+      name: name.trim() ? name.trim() : null,
+      min_ev: minEv,
+      max_ev: maxEv,
+      min_odds: minOdds,
+      max_odds: maxOdds,
+      min_minutes: minHours * 60,
+      max_minutes: maxHours * 60,
+    };
+    setRules((prev) => [...prev, newRule]);
+    applyRule(newRule);
+  };
+
+  const handleSaveRules = async () => {
+    setRuleSaveState("saving");
+    const ok = await saveRules(rules);
+    if (ok) {
+      rulesDirtyRef.current = JSON.stringify(rules);
+      setRuleSaveState("saved");
+    } else {
+      setRuleSaveState("error");
+    }
+    setTimeout(() => setRuleSaveState("idle"), 2500);
+  };
+
+  const handleDeleteRule = () => {
+    if (activeRuleNumber == null) return;
+    setRules((prev) => prev.filter((r) => r.rule_number !== activeRuleNumber));
+    setActiveRuleNumber(null);
+  };
+
   /* ------------------------------ derived ------------------------------ */
   return (
     <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
@@ -239,6 +337,68 @@ export default function StrategyPage() {
 
         {/* CONTROLS */}
         <section className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6">
+          {/* RULE SELECTOR */}
+          <div className="flex flex-wrap items-end gap-3 mb-4 p-3 rounded-md bg-gray-50 border border-gray-200">
+            <label className="block min-w-64 flex-1">
+              <span className="text-xs uppercase font-semibold text-gray-500">
+                Saved rule — loads its filters to see the outcome
+              </span>
+              <select
+                value={activeRuleNumber == null ? "" : String(activeRuleNumber)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") {
+                    setActiveRuleNumber(null);
+                  } else {
+                    const rule = rules.find((r) => String(r.rule_number) === v);
+                    if (rule) applyRule(rule);
+                  }
+                }}
+                className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white"
+              >
+                <option value="">🎯 Free selection — no rule applied; sliders won't edit any saved rule</option>
+                {rules.map((r) => (
+                  <option key={r.rule_number} value={String(r.rule_number)}>
+                    {ruleDisplayName(r)} — {ruleSummary(r)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              onClick={handleSaveAsNewRule}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-emerald-600 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+            >
+              ＋ Save current as new rule
+            </button>
+
+            <button
+              onClick={handleSaveRules}
+              disabled={ruleSaveState === "saving" || !rulesDirty}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+            >
+              {ruleSaveState === "saving" && "Saving…"}
+              {ruleSaveState === "saved" && "Rules saved ✓"}
+              {ruleSaveState === "error" && "Save failed — retry"}
+              {ruleSaveState === "idle" && (rulesDirty ? "Save rules" : "All rules saved")}
+            </button>
+
+            {activeRuleNumber != null && (
+              <button
+                onClick={handleDeleteRule}
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-300 text-red-600 bg-white hover:bg-red-50 transition-colors"
+              >
+                Delete rule
+              </button>
+            )}
+
+            <p className="w-full text-xs text-gray-400">
+              {activeRuleNumber == null
+                ? "Free selection: adjust the filters freely — saved rules are untouched until you edit them with a rule selected."
+                : `Editing "${ruleDisplayName(rules.find((r) => r.rule_number === activeRuleNumber) ?? { rule_number: activeRuleNumber, name: null })}" — slider changes update that rule; press “Save rules” to persist."`}
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
             <label className="block">
               <span className="text-xs uppercase font-semibold text-gray-500">Dedup (correlated bets)</span>
@@ -258,8 +418,8 @@ export default function StrategyPage() {
                 Min EV: <b>{minEv}%</b>
               </span>
               <input
-                type="range" min={0} max={10} step={0.5} value={minEv}
-                onChange={(e) => setMinEv(Math.min(Number(e.target.value), maxEv))}
+                type="range" min={RULE_EV_MIN} max={RULE_EV_MAX} step={0.5} value={minEv}
+                onChange={(e) => changeMinEv(Number(e.target.value))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>
@@ -269,8 +429,8 @@ export default function StrategyPage() {
                 Max EV: <b>{maxEv}%</b>
               </span>
               <input
-                type="range" min={0} max={10} step={0.5} value={maxEv}
-                onChange={(e) => setMaxEv(Math.max(Number(e.target.value), minEv))}
+                type="range" min={RULE_EV_MIN} max={RULE_EV_MAX} step={0.5} value={maxEv}
+                onChange={(e) => changeMaxEv(Number(e.target.value))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>
@@ -280,8 +440,8 @@ export default function StrategyPage() {
                 Bet placed ≥ <b>{minHours}h</b> before start
               </span>
               <input
-                type="range" min={0} max={23} step={1} value={minHours}
-                onChange={(e) => setMinHours(Math.min(Number(e.target.value), maxHours))}
+                type="range" min={RULE_HOUR_MIN} max={RULE_HOUR_MAX} step={1} value={minHours}
+                onChange={(e) => changeMinHours(Number(e.target.value))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>
@@ -291,8 +451,8 @@ export default function StrategyPage() {
                 Bet placed ≤ <b>{maxHours}h</b> before start
               </span>
               <input
-                type="range" min={0} max={23} step={1} value={maxHours}
-                onChange={(e) => setMaxHours(Math.max(Number(e.target.value), minHours))}
+                type="range" min={RULE_HOUR_MIN} max={RULE_HOUR_MAX} step={1} value={maxHours}
+                onChange={(e) => changeMaxHours(Number(e.target.value))}
                 className="w-full mt-2 accent-blue-600"
               />
             </label>
@@ -302,13 +462,13 @@ export default function StrategyPage() {
               <div className="flex items-center gap-2 mt-1">
                 <input
                   type="number" min={1.9} max={2.4} step={0.01} value={minOdds}
-                  onChange={(e) => setMinOdds(Number(e.target.value))}
+                  onChange={(e) => changeMinOdds(Number(e.target.value))}
                   className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
                 />
                 <span className="text-gray-400">–</span>
                 <input
                   type="number" min={1.9} max={2.4} step={0.01} value={maxOdds}
-                  onChange={(e) => setMaxOdds(Number(e.target.value))}
+                  onChange={(e) => changeMaxOdds(Number(e.target.value))}
                   className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
                 />
               </div>

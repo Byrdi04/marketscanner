@@ -311,30 +311,30 @@ def load_notification_rules():
 
 
 def save_notification_rules(rules):
-    """Saves both notification rules to DB."""
+    """Saves rules to DB — inserts new rule_numbers, replaces existing ones (shared rule store)."""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         for rule in rules:
+            market_types = rule["market_types"]
+            if isinstance(market_types, list):
+                market_types = ",".join(market_types)
             cursor.execute('''
-                UPDATE notification_rules SET
-                    enabled = ?,
-                    min_ev = ?,
-                    min_odds = ?,
-                    max_odds = ?,
-                    market_types = ?,
-                    min_minutes = ?,
-                    max_minutes = ?
-                WHERE rule_number = ?
+                INSERT OR REPLACE INTO notification_rules
+                (rule_number, name, enabled, min_ev, max_ev, min_odds, max_odds,
+                 market_types, min_minutes, max_minutes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                rule['enabled'],
-                rule['min_ev'],
-                rule['min_odds'],
-                rule['max_odds'],
-                rule['market_types'],
-                rule.get('min_minutes'),
-                rule.get('max_minutes'),
-                rule['rule_number'],
+                int(rule["rule_number"]),
+                rule.get("name"),
+                rule["enabled"],
+                float(rule["min_ev"]),
+                float(rule.get("max_ev", 10.0)),
+                float(rule["min_odds"]),
+                float(rule["max_odds"]),
+                market_types,
+                rule.get("min_minutes"),
+                rule.get("max_minutes"),
             ))
         conn.commit()
         conn.close()
@@ -399,6 +399,8 @@ def check_and_notify(opportunities):
             for rule in active_rules:
                 # A. EV check
                 if opp["ev"] < rule["min_ev"]:
+                    continue
+                if rule.get("max_ev") is not None and opp["ev"] > rule["max_ev"]:
                     continue
 
                 # B. Odds range check
@@ -863,13 +865,15 @@ def init_db():
         )
     ''')
 
-    # 5.5 NOTIFICATION RULES
+    # 5.5 NOTIFICATION RULES (shared rule store: used by notifications + strategy page)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notification_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             rule_number INTEGER UNIQUE,
+            name TEXT,
             enabled TEXT DEFAULT 'false',
             min_ev REAL DEFAULT 3.5,
+            max_ev REAL DEFAULT 10.0,
             min_odds REAL DEFAULT 1.60,
             max_odds REAL DEFAULT 2.50,
             market_types TEXT DEFAULT 'Spread,Total,MoneyLine',
@@ -890,6 +894,9 @@ def init_db():
     # Migration: Add league column to paper_bets if missing (for existing DBs)
     _migrate_add_league_column()
 
+    # Migration: Add shared-rule columns (name, max_ev) if missing
+    _migrate_add_rule_columns()
+
 def _migrate_add_league_column():
     """Add league column to paper_bets if it doesn't exist yet."""
     try:
@@ -901,6 +908,29 @@ def _migrate_add_league_column():
         conn.close()
     except sqlite3.OperationalError:
         # Column already exists — no problem
+        pass
+
+def _migrate_add_rule_columns():
+    """Add name/max_ev columns to notification_rules if missing (unified rule store).
+    Backfills max_ev so notification filtering stays active for legacy rules."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        changed = False
+        cols = {row[1] for row in cursor.execute("PRAGMA table_info(notification_rules)").fetchall()}
+        if "name" not in cols:
+            cursor.execute("ALTER TABLE notification_rules ADD COLUMN name TEXT")
+            changed = True
+        if "max_ev" not in cols:
+            cursor.execute("ALTER TABLE notification_rules ADD COLUMN max_ev REAL")
+            changed = True
+        # Backfill existing rows so max_ev is never NULL (legacy rules)
+        cursor.execute("UPDATE notification_rules SET max_ev = ? WHERE max_ev IS NULL", (10.0,))
+        if changed:
+            print("✅ Migration: Added rule columns (name, max_ev).")
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError:
         pass
 
 def migrate_to_rules():
@@ -933,12 +963,14 @@ def migrate_to_rules():
     # 3. Insert Rule 1 (from existing config or defaults)
     cursor.execute('''
         INSERT INTO notification_rules 
-        (rule_number, enabled, min_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (rule_number, name, enabled, min_ev, max_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         1,
+        None,
         'true',
         float(old_config.get('min_ev', '3.5')),
+        10.0,
         float(old_config.get('min_odds', '1.60')),
         float(old_config.get('max_odds', '2.50')),
         old_config.get('market_types', 'Spread,Total,MoneyLine'),
@@ -949,12 +981,14 @@ def migrate_to_rules():
     # 4. Insert Rule 2 (disabled defaults)
     cursor.execute('''
         INSERT INTO notification_rules 
-        (rule_number, enabled, min_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (rule_number, name, enabled, min_ev, max_ev, min_odds, max_odds, market_types, min_minutes, max_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         2,
+        None,
         'false',
         5.0,
+        10.0,
         1.60,
         2.50,
         'Spread,Total,MoneyLine',
@@ -1193,8 +1227,10 @@ class NotificationConfig(BaseModel):
 
 class NotificationRule(BaseModel):
     rule_number: int
+    name: Optional[str] = None
     enabled: bool
     min_ev: float
+    max_ev: float = 10.0
     min_odds: float
     max_odds: float
     market_types: list[str]
@@ -1561,8 +1597,10 @@ def post_notification_rules(rules: list[NotificationRule]):
         for rule in rules:
             save_list.append({
                 "rule_number": rule.rule_number,
+                "name": rule.name,
                 "enabled": "true" if rule.enabled else "false",
                 "min_ev": rule.min_ev,
+                "max_ev": rule.max_ev,
                 "min_odds": rule.min_odds,
                 "max_odds": rule.max_odds,
                 "market_types": ",".join(rule.market_types),
