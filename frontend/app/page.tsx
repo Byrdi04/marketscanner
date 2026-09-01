@@ -193,6 +193,9 @@ export default function Home() {
                 <Link href="/analytics" className="text-blue-600 hover:underline font-medium">
                   Analytics 📊
                 </Link>
+                <Link href="/strategy" className="text-emerald-600 hover:underline font-medium">
+                  Strategy 🎯
+                </Link>
                 <Link href="/settings" className="text-gray-600 hover:underline font-medium">
                   Settings ⚙️
                 </Link>

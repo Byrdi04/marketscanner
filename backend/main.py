@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError
 import pytz
 import json
+from strategy_analysis import build_evidence
 
 # Load environment variables
 load_dotenv()
@@ -1429,6 +1430,31 @@ def get_analytics():
         },
         "chart_data": chart_data
     }
+
+# ---------------------------------------------------------
+# STRATEGY ANALYSIS ENDPOINT (Phase 0+1: evidence tables)
+# Uses ONLY already-collected paper_bets data — no extra API credits.
+# ---------------------------------------------------------
+
+@app.get("/api/strategy-analysis")
+def get_strategy_analysis(
+    dedup: str = "match_selection",
+    min_ev: float = 0.0,
+    min_minutes: float = 0.0,
+    max_minutes: float = 100000.0,
+    min_odds: float = 1.0,
+    max_odds: float = 100.0,
+):
+    if dedup not in ("none", "match_selection", "game"):
+        raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
+    return build_evidence(
+        dedup=dedup,
+        min_ev=min_ev,
+        min_minutes=min_minutes,
+        max_minutes=max_minutes,
+        min_odds=min_odds,
+        max_odds=max_odds,
+    )
 
 # ---------------------------------------------------------
 # NOTIFICATION ENDPOINTS
