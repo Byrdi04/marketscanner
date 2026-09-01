@@ -7,6 +7,7 @@ interface GlobalConfig {
   enabled: boolean;
   ntfy_topic: string;
   cooldown_minutes: number;
+  paper_bets_limit: number;
 }
 
 interface NotificationRule {
@@ -59,6 +60,7 @@ export default function Settings() {
     enabled: false,
     ntfy_topic: "",
     cooldown_minutes: 120,
+    paper_bets_limit: 5000,
   });
 
   // Rules
@@ -86,6 +88,7 @@ export default function Settings() {
         enabled: settingsJson.config.enabled === "true",
         ntfy_topic: settingsJson.config.ntfy_topic || "",
         cooldown_minutes: parseInt(settingsJson.config.cooldown_minutes || "120"),
+        paper_bets_limit: parseInt(settingsJson.config.paper_bets_limit || "5000"),
       });
 
       setLog(settingsJson.recent_log || []);
@@ -499,6 +502,45 @@ export default function Settings() {
               {testStatus === "error" && "Error - Try Again"}
               {testStatus === "idle" && "Send Test Notification"}
             </button>
+          </div>
+        </div>
+
+        {/* PAPER TRADING SETTINGS CARD */}
+        <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-1">Paper Trading</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Configure how many historical paper bets are loaded for analysis.
+            Higher numbers give better data but use more memory.
+          </p>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Bet History Limit:{" "}
+              <span className="font-mono text-gray-900">
+                {config.paper_bets_limit.toLocaleString()}
+              </span>
+            </label>
+            <input
+              type="range"
+              min="500"
+              max="50000"
+              step="500"
+              value={config.paper_bets_limit}
+              onChange={(e) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  paper_bets_limit: parseInt(e.target.value),
+                }))
+              }
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+            />
+            <div className="flex justify-between text-xs text-gray-400 mt-1">
+              <span>500</span>
+              <span>50,000</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Default: 5,000 bets. Higher values will load more data into the browser.
+            </p>
           </div>
         </div>
 

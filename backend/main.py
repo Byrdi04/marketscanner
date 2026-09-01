@@ -256,6 +256,7 @@ def load_notification_config():
         "enabled": "false",
         "ntfy_topic": NTFY_TOPIC or "",
         "cooldown_minutes": "120",
+        "paper_bets_limit": "5000",
     }
 
     try:
@@ -1186,6 +1187,7 @@ class NotificationConfig(BaseModel):
     enabled: bool
     ntfy_topic: str
     cooldown_minutes: int
+    paper_bets_limit: int = 5000
 
 class NotificationRule(BaseModel):
     rule_number: int
@@ -1331,8 +1333,17 @@ def get_paper_bets():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row 
     cursor = conn.cursor()
-    # Limit to last 500 to keep the UI fast as data grows
-    cursor.execute("SELECT * FROM paper_bets ORDER BY timestamp DESC LIMIT 500")
+
+    # Use configurable limit (defaults to 5000) so analysis covers more history
+    config = load_notification_config()
+    try:
+        limit = int(config.get("paper_bets_limit", "5000"))
+    except (ValueError, TypeError):
+        limit = 5000
+    # Cap at a sane upper bound to protect the DB from absurd values
+    limit = max(100, min(limit, 50000))
+
+    cursor.execute("SELECT * FROM paper_bets ORDER BY timestamp DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     conn.close()
     return {"data": [dict(row) for row in rows]}
@@ -1455,6 +1466,7 @@ def post_notification_settings(config: NotificationConfig):
             "enabled": "true" if config.enabled else "false",
             "ntfy_topic": config.ntfy_topic.strip(),
             "cooldown_minutes": str(config.cooldown_minutes),
+            "paper_bets_limit": str(config.paper_bets_limit),
         }
         save_notification_config(save_dict)
         return {"message": "Settings saved successfully"}
