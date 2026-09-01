@@ -15,6 +15,7 @@ from apscheduler.jobstores.base import JobLookupError
 import pytz
 import json
 from strategy_analysis import build_evidence
+from strategy_model import build_model, build_sweep
 
 # Load environment variables
 load_dotenv()
@@ -1452,6 +1453,40 @@ def get_strategy_analysis(
         min_ev=min_ev,
         min_minutes=min_minutes,
         max_minutes=max_minutes,
+        min_odds=min_odds,
+        max_odds=max_odds,
+    )
+
+@app.get("/api/strategy-model")
+def get_strategy_model(
+    dedup: str = "match_selection",
+    min_ev: float = 0.0,
+    min_minutes: float = 0.0,
+    max_minutes: float = 100000.0,
+    min_odds: float = 1.0,
+    max_odds: float = 100.0,
+):
+    if dedup not in ("none", "match_selection", "game"):
+        raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
+    return build_model(
+        dedup=dedup,
+        min_ev=min_ev,
+        min_minutes=min_minutes,
+        max_minutes=max_minutes,
+        min_odds=min_odds,
+        max_odds=max_odds,
+    )
+
+@app.get("/api/strategy-sweep")
+def get_strategy_sweep(
+    dedup: str = "match_selection",
+    min_odds: float = 1.0,
+    max_odds: float = 100.0,
+):
+    if dedup not in ("none", "match_selection", "game"):
+        raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
+    return build_sweep(
+        dedup=dedup,
         min_odds=min_odds,
         max_odds=max_odds,
     )
