@@ -89,3 +89,27 @@ export function normalizeRule(r: any): StrategyRule | null {
     max_minutes: r.max_minutes == null ? null : Number(r.max_minutes),
   };
 }
+
+/* Shape of an opportunity as seen by rule matching (subset of the API payload). */
+export interface RuleMatchCandidate {
+  ev: number;
+  danske_odds: number;
+  type: string;
+  commence_time: string;
+}
+
+/* Whether an opportunity satisfies one saved rule.
+   Mirrors backend check_and_notify semantics exactly:
+   - EV and odds bounds are inclusive
+   - market type must be in the rule's list
+   - the time window applies only when BOTH min_minutes and max_minutes are set */
+export function matchesRule(rule: StrategyRule, opp: RuleMatchCandidate): boolean {
+  if (opp.ev < rule.min_ev || opp.ev > rule.max_ev) return false;
+  if (opp.danske_odds < rule.min_odds || opp.danske_odds > rule.max_odds) return false;
+  if (!rule.market_types.includes(opp.type)) return false;
+  if (rule.min_minutes != null && rule.max_minutes != null) {
+    const minutesUntil = (new Date(opp.commence_time).getTime() - Date.now()) / 60000;
+    if (minutesUntil < rule.min_minutes || minutesUntil > rule.max_minutes) return false;
+  }
+  return true;
+}

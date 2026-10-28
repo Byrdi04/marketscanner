@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import BetModal from "../components/BetModal";
+import {
+  StrategyRule, fetchRules, matchesRule, ruleDisplayName, ruleSummary,
+} from "./rules";
 
 // INTERFACES
 interface Opportunity {
@@ -46,6 +50,8 @@ export default function Home() {
   const [bankroll, setBankroll] = useState(1000);
   const [minEv, setMinEv] = useState(3.5); // Default: Only show > 2% EV
   const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
+  const [rules, setRules] = useState<StrategyRule[]>([]);
+  const [selectedRuleNumbers, setSelectedRuleNumbers] = useState<Set<number>>(new Set());
 
   // 1. FETCH SCANNER DATA
   const fetchScanner = async (isManualRefresh = true) => {
@@ -83,6 +89,29 @@ export default function Home() {
     fetchScanner(false); // <--- FALSE: Load stale data if available
     fetchPlacedBets();
   }, []);
+
+  // 2b. FETCH SAVED NOTIFICATION RULES (rule-based filtering)
+  useEffect(() => {
+    (async () => {
+      const loaded = await fetchRules();
+      setRules(loaded);
+      // Pre-select enabled ("approved") rules on every mount; disabled rules stay unchecked.
+      setSelectedRuleNumbers(new Set(loaded.filter((r) => r.enabled).map((r) => r.rule_number)));
+    })();
+  }, []);
+
+  // Selected rules + derived flag (≥1 rule selected ⇒ rules replace the EV slider)
+  const selectedRules = rules.filter((r) => selectedRuleNumbers.has(r.rule_number));
+  const rulesActive = selectedRules.length > 0;
+
+  const toggleRule = (ruleNumber: number) => {
+    setSelectedRuleNumbers((prev) => {
+      const next = new Set(prev);
+      if (next.has(ruleNumber)) next.delete(ruleNumber);
+      else next.add(ruleNumber);
+      return next;
+    });
+  };
 
   // 3. HELPER: CHECK IF BET IS PLACED
   const isBetPlaced = (op: Opportunity) => {
@@ -159,9 +188,13 @@ export default function Home() {
 
   // 5. FILTER LOGIC
   const filteredData = scannerData.filter(bet => {
-    // A. EV Filter
-    if (bet.ev < minEv) return false;
-    // B. Hide Placed Filter
+    // A. Rule filter (OR across selected rules) — replaces the EV slider when active
+    if (rulesActive) {
+      if (!selectedRules.some(rule => matchesRule(rule, bet))) return false;
+    } else if (bet.ev < minEv) {
+      return false;
+    }
+    // B. Hide Placed Filter (always AND)
     if (hidePlaced && isBetPlaced(bet)) return false;
     return true;
   });
@@ -232,10 +265,10 @@ export default function Home() {
 
         {/* FILTERS BAR */}
         <div className="card mb-6 flex flex-wrap items-center gap-x-6 gap-y-4 px-4 py-4">
-          {/* Min EV Slider */}
+          {/* Min EV Slider — inert while rule filtering is active */}
           <div className="flex items-center gap-3">
-            <label className="min-w-[110px] text-sm font-medium text-slate-300">
-              {minEv <= -5 ? "Filter: Off" : `Min EV: ${minEv}%`}
+            <label className={`min-w-[110px] text-sm font-medium ${rulesActive ? "text-slate-500" : "text-slate-300"}`}>
+              {rulesActive ? "Min EV (rules)" : minEv <= -5 ? "Filter: Off" : `Min EV: ${minEv}%`}
             </label>
             <input
               type="range"
@@ -244,8 +277,12 @@ export default function Home() {
               step="0.5"
               value={minEv}
               onChange={(e) => setMinEv(parseFloat(e.target.value))}
-              className="w-32 cursor-pointer accent-emerald-500"
+              disabled={rulesActive}
+              className="w-32 cursor-pointer accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             />
+            {rulesActive && (
+              <span className="text-xs italic text-slate-500">EV is set by the selected rules</span>
+            )}
           </div>
 
           {/* Toggle Hide Placed */}
@@ -260,9 +297,53 @@ export default function Home() {
             <span className="text-sm text-slate-300">Hide Already Placed</span>
           </label>
 
+          {/* Saved Rule Filter */}
+          {rules.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-sm font-medium text-slate-300">Rules:</span>
+              {rules.map((rule) => (
+                <label
+                  key={rule.rule_number}
+                  className={`flex cursor-pointer select-none items-center gap-1.5 text-sm ${
+                    rule.enabled ? "text-slate-200" : "text-slate-500"
+                  }`}
+                  title={ruleSummary(rule)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedRuleNumbers.has(rule.rule_number)}
+                    onChange={() => toggleRule(rule.rule_number)}
+                    className="h-4 w-4 rounded accent-emerald-500"
+                  />
+                  {ruleDisplayName(rule)}
+                  {!rule.enabled && (
+                    <span className="rounded border border-slate-600 px-1 text-[10px] uppercase tracking-wide text-slate-500">
+                      disabled
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">
+              No saved rules yet —{" "}
+              <Link href="/strategy" className="text-emerald-400 hover:underline">
+                create them on the Strategy page
+              </Link>
+              .
+            </p>
+          )}
+
           <div className="ml-auto text-xs text-slate-500">
             Showing <span className="font-medium text-slate-300">{filteredData.length}</span> of{" "}
             {scannerData.length} opportunities
+            {rulesActive && (
+              <>
+                {" "}· filtered by{" "}
+                <span className="font-medium text-slate-300">{selectedRules.length}</span>{" "}
+                rule{selectedRules.length === 1 ? "" : "s"}
+              </>
+            )}
           </div>
         </div>
 
@@ -285,7 +366,9 @@ export default function Home() {
                 {filteredData.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-5 py-10 text-center text-slate-500">
-                      No bets match your filters.
+                      {rulesActive
+                        ? "No opportunities match your selected rules."
+                        : "No bets match your filters."}
                     </td>
                   </tr>
                 )}
