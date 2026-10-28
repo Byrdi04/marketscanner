@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import BetModal from "../components/BetModal";
 
 // INTERFACES
@@ -134,14 +133,14 @@ export default function Home() {
 
     // Helper: Calculate minutes since Pinnacle update
   const getStalenessInfo = () => {
-    if (dataAge === 0) return { color: "bg-gray-400", text: "Unknown" };
-    
+    if (dataAge === 0) return { color: "bg-slate-500", text: "Unknown" };
+
     const now = Math.floor(Date.now() / 1000);
     const diffMinutes = Math.floor((now - dataAge) / 60);
-    
-    if (diffMinutes < 5) return { color: "bg-green-500", text: "Fresh (< 5m)" };
-    if (diffMinutes < 15) return { color: "bg-yellow-500", text: `Aging (${diffMinutes}m)` };
-    return { color: "bg-red-500", text: `Stale (${diffMinutes}m)` };
+
+    if (diffMinutes < 5) return { color: "bg-emerald-400", text: "Fresh (< 5m)" };
+    if (diffMinutes < 15) return { color: "bg-amber-400", text: `Aging (${diffMinutes}m)` };
+    return { color: "bg-rose-400", text: `Stale (${diffMinutes}m)` };
   };
 
   // Helper: Format start time
@@ -150,12 +149,12 @@ export default function Home() {
     const now = new Date();
     const diffMs = start.getTime() - now.getTime();
     const diffHrs = diffMs / (1000 * 60 * 60);
-    
+
     // If started or starting in 10 mins
-    if (diffHrs < 0) return <span className="text-red-600 font-bold">Live / Started</span>;
-    if (diffHrs < 1) return <span className="text-orange-600 font-bold">In {Math.floor(diffHrs * 60)}m</span>;
-    if (diffHrs < 24) return <span className="text-gray-700">In {Math.floor(diffHrs)}h</span>;
-    return <span className="text-gray-400">{start.toLocaleDateString()}</span>;
+    if (diffHrs < 0) return <span className="font-bold text-rose-400">Live / Started</span>;
+    if (diffHrs < 1) return <span className="font-bold text-amber-300">In {Math.floor(diffHrs * 60)}m</span>;
+    if (diffHrs < 24) return <span className="text-slate-300">In {Math.floor(diffHrs)}h</span>;
+    return <span className="text-slate-500">{start.toLocaleDateString()}</span>;
   };
 
   // 5. FILTER LOGIC
@@ -168,163 +167,184 @@ export default function Home() {
   });
 
   const getEvColor = (ev: number) => {
-    if (ev >= 5) return "text-green-600 font-bold";
-    if (ev > 0) return "text-green-500";
-    return "text-gray-500";
+    if (ev >= 5) return "font-bold text-emerald-400";
+    if (ev > 0) return "text-emerald-400/80";
+    return "text-slate-500";
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
-      <div className="max-w-6xl mx-auto">
-        
+    <main className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 lg:py-8">
         {/* HEADER */}
-        <div className="flex justify-between items-start mb-8">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Market Scanner</h1>
-            <div className="flex gap-4 mt-1 text-sm">
-              <p className="text-gray-500">Live EV Finder</p>
-              <Link href="/portfolio" className="text-blue-600 hover:underline font-medium">
-                View Portfolio →
-              </Link>
-                <span className="text-gray-300">|</span>
-                <Link href="/paper-trading" className="text-purple-600 hover:underline font-medium">
-                  Paper Trading 🤖
-                </Link>
-                <Link href="/analytics" className="text-blue-600 hover:underline font-medium">
-                  Analytics 📊
-                </Link>
-                <Link href="/strategy" className="text-emerald-600 hover:underline font-medium">
-                  Strategy 🎯
-                </Link>
-                <Link href="/settings" className="text-gray-600 hover:underline font-medium">
-                  Settings ⚙️
-                </Link>
-            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
+              Live EV Scanner
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Soft odds found where Danske Spil diverges from Pinnacle
+            </p>
           </div>
-          
-          <div className="text-right">
+
+          <div className="flex flex-wrap items-end gap-3 sm:flex-col sm:items-end sm:gap-2">
             <button
               onClick={() => fetchScanner(true)}
               disabled={loading}
-              className="..."
+              className="btn btn-primary"
             >
-              {loading ? "Scanning..." : "Refresh Data"}
+              {loading ? (
+                <>
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
+                  Scanning…
+                </>
+              ) : (
+                <>
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                    <path d="M21 3v6h-6" />
+                  </svg>
+                  Refresh Data
+                </>
+              )}
             </button>
-            <div className="mt-2 flex flex-col items-end text-xs text-gray-400">
+
+            <div className="flex flex-col items-start gap-1 text-right text-xs text-slate-400 sm:items-end">
               <span>Updated: {lastUpdated || "-"}</span>
-              <span className="font-mono mt-1">API Credits: {quota}</span>
+              <span className="font-mono">API Credits: {quota}</span>
 
               {/* STALENESS INDICATOR */}
-              <div className="flex items-center gap-2">
+              <span className="flex items-center gap-2">
                 <span>Pinnacle Data:</span>
-                <span className={`w-2 h-2 rounded-full ${getStalenessInfo().color}`}></span>
-                <span className="font-medium">{getStalenessInfo().text}</span>
-              </div>
+                <span className={`inline-block h-2 w-2 rounded-full ${getStalenessInfo().color}`} />
+                <span className="font-medium text-slate-300">{getStalenessInfo().text}</span>
+              </span>
             </div>
           </div>
         </div>
 
         {/* FILTERS BAR */}
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 flex flex-wrap gap-6 items-center">
-          
+        <div className="card mb-6 flex flex-wrap items-center gap-x-6 gap-y-4 px-4 py-4">
           {/* Min EV Slider */}
           <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700 min-w-[100px]">
+            <label className="min-w-[110px] text-sm font-medium text-slate-300">
               {minEv <= -5 ? "Filter: Off" : `Min EV: ${minEv}%`}
             </label>
-            <input 
-              type="range" 
-              min="-10"     // Allow dragging below 0
-              max="10" 
+            <input
+              type="range"
+              min="-10" // Allow dragging below 0
+              max="10"
               step="0.5"
-              value={minEv} 
+              value={minEv}
               onChange={(e) => setMinEv(parseFloat(e.target.value))}
-              className="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+              className="w-32 cursor-pointer accent-emerald-500"
             />
           </div>
 
           {/* Toggle Hide Placed */}
-          <div className="flex items-center gap-2">
-            <input 
-              type="checkbox" 
+          <label className="flex cursor-pointer select-none items-center gap-2">
+            <input
+              type="checkbox"
               id="hidePlaced"
               checked={hidePlaced}
               onChange={(e) => setHidePlaced(e.target.checked)}
-              className="w-4 h-4 text-black rounded focus:ring-black"
+              className="h-4 w-4 rounded accent-emerald-500"
             />
-            <label htmlFor="hidePlaced" className="text-sm text-gray-700 cursor-pointer select-none">
-              Hide Already Placed
-            </label>
-          </div>
+            <span className="text-sm text-slate-300">Hide Already Placed</span>
+          </label>
 
-          <div className="ml-auto text-xs text-gray-400">
-            Showing {filteredData.length} of {scannerData.length} opportunities
+          <div className="ml-auto text-xs text-slate-500">
+            Showing <span className="font-medium text-slate-300">{filteredData.length}</span> of{" "}
+            {scannerData.length} opportunities
           </div>
         </div>
 
         {/* DATA TABLE */}
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-100 text-gray-600 font-medium border-b">
+            <table className="data-table text-sm">
+              <thead className="border-b border-slate-700/80 bg-slate-900/80 font-semibold text-slate-400">
                 <tr>
-                  <th className="px-6 py-3">Match</th>
-                  <th className="px-6 py-3">Start</th>
-                  <th className="px-6 py-3">Selection</th>
-                  <th className="px-6 py-3">Market</th>
-                  <th className="px-6 py-3 text-right">Danske</th>
-                  <th className="px-6 py-3 text-right">Fair</th>
-                  <th className="px-6 py-3 text-right">EV</th>
+                  <th className="px-5 py-3">Match</th>
+                  <th className="px-5 py-3">Start</th>
+                  <th className="px-5 py-3">Selection</th>
+                  <th className="px-5 py-3">Market</th>
+                  <th className="px-5 py-3 text-right">Danske</th>
+                  <th className="px-5 py-3 text-right">Fair</th>
+                  <th className="px-5 py-3 text-right">EV</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-800">
                 {filteredData.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-5 py-10 text-center text-slate-500">
                       No bets match your filters.
                     </td>
                   </tr>
                 )}
-                
+
                 {filteredData.map((bet) => {
                   const placed = isBetPlaced(bet);
                   const exposure = !placed && hasMatchExposure(bet); // Only show exposure warning if not already placed
 
                   return (
-                    <tr 
-                      key={bet.id} 
+                    <tr
+                      key={bet.id}
                       onClick={() => !placed && setSelectedBet(bet)}
-                      className={`
-                        transition border-b last:border-0
-                        ${placed ? "bg-gray-50 opacity-60 cursor-not-allowed" : "hover:bg-blue-50 cursor-pointer"}
-                      `}
+                      className={`transition-colors last:border-0 ${
+                        placed
+                          ? "cursor-not-allowed bg-slate-900/40 opacity-50"
+                          : "cursor-pointer hover:bg-slate-800/50"
+                      }`}
                     >
-                      <td className="px-6 py-4 font-medium">
+                      <td data-label="Match" className="px-5 py-4 font-medium text-slate-100">
                         {bet.match}
                         {/* Exposure Warning Badge */}
                         {exposure && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700 border border-orange-200" title="You already have a bet on this match">
+                          <span
+                            className="ml-2 inline-block rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300"
+                            title="You already have a bet on this match"
+                          >
                             ⚠ Exposure
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-sm whitespace-nowrap">
+                      <td data-label="Start" className="px-5 py-4 text-sm whitespace-nowrap">
                         {formatStartTime(bet.commence_time)}
                       </td>
-                      <td className="px-6 py-4">
+                      <td data-label="Selection" className="px-5 py-4">
                         {bet.selection}
-                        {bet.line && <span className="ml-2 text-gray-400 text-xs">({bet.line})</span>}
+                        {bet.line != null && (
+                          <span className="ml-2 text-xs text-slate-500">({bet.line})</span>
+                        )}
                         {placed && (
-                          <span className="ml-2 text-xs font-bold text-green-600 border border-green-200 bg-green-50 px-1 rounded">
+                          <span className="ml-2 inline-block rounded border border-emerald-500/30 bg-emerald-500/10 px-1 text-xs font-bold text-emerald-300">
                             ✓ Placed
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-gray-500">{bet.type}</td>
-                      <td className="px-6 py-4 text-right font-mono">{bet.danske_odds.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right text-gray-400 font-mono">{bet.fair_odds.toFixed(2)}</td>
-                      <td className={`px-6 py-4 text-right font-mono ${getEvColor(bet.ev)}`}>
-                        {bet.ev > 0 ? "+" : ""}{bet.ev}%
+                      <td data-label="Market" className="px-5 py-4 text-slate-400">
+                        {bet.type}
+                      </td>
+                      <td data-label="Danske" className="px-5 py-4 text-right font-mono text-slate-200">
+                        {bet.danske_odds.toFixed(2)}
+                      </td>
+                      <td data-label="Fair" className="px-5 py-4 text-right font-mono text-slate-500">
+                        {bet.fair_odds.toFixed(2)}
+                      </td>
+                      <td
+                        data-label="EV"
+                        className={`px-5 py-4 text-right font-mono ${getEvColor(bet.ev)}`}
+                      >
+                        {bet.ev > 0 ? "+" : ""}
+                        {bet.ev}%
                       </td>
                     </tr>
                   );
@@ -335,9 +355,9 @@ export default function Home() {
         </div>
       </div>
 
-      <BetModal 
-        bet={selectedBet} 
-        isOpen={!!selectedBet} 
+      <BetModal
+        bet={selectedBet}
+        isOpen={!!selectedBet}
         onClose={() => setSelectedBet(null)}
         onConfirm={handleConfirmBet}
         currentBankroll={bankroll}

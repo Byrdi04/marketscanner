@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #020617; /* slate-950 */
+  --foreground: #e2e8f0; /* slate-200 */
+  --card: #0f172a;       /* slate-900 */
+  --border: #1e293b;     /* slate-800 */
 }
 
 @theme inline {
@@ -12,15 +14,148 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
+}
+
+/*
+ * Hard safety net: never let a stray wide element (wide tables, long
+ * unbreakable strings) push the page out of bounds on mobile.
+ */
+html,
+body {
+  overflow-x: clip;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Hide scrollbars on horizontally scrolling rows (pill nav, filter bar). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Slim, theme-aware scrollbar for the rest of the page. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(51 65 85 / 0.8) transparent;
+}
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(51 65 85 / 0.8);
+  border-radius: 999px;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-800 bg-slate-900/70 shadow-lg shadow-black/20;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-slate-700/70 bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-emerald-500 text-slate-950 hover:bg-emerald-400;
+  }
+
+  .btn-ghost {
+    @apply border border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60;
+  }
+
+  .btn-danger {
+    @apply border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20;
+    color-scheme: dark;
+  }
+
+  .select {
+    @apply w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20;
+    color-scheme: dark;
+  }
+
+  .label-sm {
+    @apply text-[0.6875rem] font-semibold uppercase tracking-wider text-slate-500;
+  }
+}
+
+/*
+ * Responsive tables.
+ *
+ * On desktop they render as a normal table inside a no-scroll wrapper; on
+ * small screens (< 640px) each row collapses into a self-contained card
+ * with the header label pulled from the cell's `data-label` attribute.
+ * This is what kills the "swipe sideways / page runs off the viewport"
+ * problem on phones while keeping the exact same content.
+ */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .data-table thead {
+    display: none;
+  }
+
+  .data-table tbody {
+    display: block;
+  }
+
+  .data-table tbody tr {
+    display: grid;
+    gap: 0.1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid rgb(51 65 85 / 0.55);
+    border-radius: 0.75rem;
+    background: rgb(15 23 42 / 0.6);
+    box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.7);
+  }
+
+  .data-table tbody tr td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+    padding: 0.3rem 0;
+    border-bottom: 1px dashed rgb(51 65 85 / 0.45);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right !important;
+  }
+
+  .data-table tbody tr td:last-child {
+    border-bottom: none;
+  }
+
+  /* The cell label is emitted from `data-label` on the <td>. */
+  .data-table tbody tr td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: #64748b; /* slate-500 */
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
 }

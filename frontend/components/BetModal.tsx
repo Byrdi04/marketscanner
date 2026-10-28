@@ -64,135 +64,140 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
   const isStakeValid = stake !== "" && !isNaN(parseFloat(stake)) && parseFloat(stake) > 0;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-4">
+      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-700/70 bg-slate-900 p-5 shadow-2xl shadow-black/50 sm:p-6">
         {/* HEADER */}
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex-1">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
             {/* MATCH INFO */}
-            <p className="text-xs text-gray-400 uppercase font-semibold mb-1">{bet.match}</p>
-            
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {bet.match}
+            </p>
+
             {/* SELECTION + LINE BADGE */}
-            <div className="flex items-center flex-wrap gap-2">
-              <h2 className="text-2xl font-bold text-gray-900">{bet.selection}</h2>
-              
-              {/* NEW: VISUAL BADGE FOR LINE */}
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-bold text-slate-50">{bet.selection}</h2>
+
+              {/* VISUAL BADGE FOR LINE */}
               {bet.line && (
-                <span className="bg-gray-100 border border-gray-300 text-gray-800 text-sm font-mono px-2 py-0.5 rounded">
-                   {bet.type}: {bet.line}
+                <span className="rounded border border-slate-600 bg-slate-700/60 px-2 py-0.5 font-mono text-sm text-slate-200">
+                  {bet.type}: {bet.line}
                 </span>
               )}
             </div>
 
             {/* EXTERNAL LINK + COPY */}
-            <div className="flex items-center gap-2 mt-2">
-              <a 
+            <div className="mt-3 flex items-center gap-2">
+              <a
                 href={`https://danskespil.dk/oddset/sports/event/${bet.event_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={handleLinkClick} // <--- INTERCEPT CLICK
-                className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition flex items-center gap-1 font-medium no-underline"
+                className="btn btn-primary !px-3 !py-1.5 !text-xs no-underline"
               >
                 Open Game ↗
               </a>
-              
+
               {/* Copied Feedback */}
               {copied ? (
-                <span className="text-xs text-green-600 font-medium animate-pulse">
+                <span className="animate-pulse text-xs font-medium text-emerald-400">
                   ✓ Copied "{bet.line.toString().replace('.', ',')}"
                 </span>
               ) : (
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[10px] text-slate-500">
                   (Clicking copies line to clipboard)
                 </span>
               )}
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">✕</button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+          >
+            ✕
+          </button>
         </div>
 
         {/* HIGH EV WARNING */}
         {isHighEv && (
-          <div className="mb-4 bg-red-50 border border-red-200 p-3 rounded-md text-sm text-red-700">
+          <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
             <strong>⚠️ Danger: High EV Detected ({bet.ev}%)</strong>
-            <p className="mt-1 text-xs">
-              Possible pricing error. Proceed with caution.
-            </p>
+            <p className="mt-1 text-xs">Possible pricing error. Proceed with caution.</p>
           </div>
         )}
 
         {/* STATS GRID */}
-        <div className="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-md border border-gray-100">
+        <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-slate-700/70 bg-slate-800/50 p-4">
           <div>
-            <p className="text-xs text-gray-500 uppercase">Odds</p>
-            <p className="text-lg font-mono font-bold text-gray-900">{bet.danske_odds.toFixed(2)}</p>
+            <p className="text-xs uppercase tracking-wider text-slate-500">Odds</p>
+            <p className="font-mono text-lg font-bold text-slate-100">
+              {bet.danske_odds.toFixed(2)}
+            </p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 uppercase">Value (EV)</p>
-            <p className={`text-lg font-mono font-bold ${isHighEv ? "text-red-600" : "text-green-600"}`}>
-              {bet.ev > 0 ? "+" : ""}{bet.ev}%
+            <p className="text-xs uppercase tracking-wider text-slate-500">Value (EV)</p>
+            <p
+              className={`font-mono text-lg font-bold ${
+                isHighEv ? "text-rose-400" : "text-emerald-400"
+              }`}
+            >
+              {bet.ev > 0 ? "+" : ""}
+              {bet.ev}%
             </p>
           </div>
         </div>
 
         {/* CALCULATOR SECTION */}
         <div className="mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <label className="text-sm font-medium text-gray-700">Staking Strategy</label>
-            <span className="text-xs text-blue-600 font-medium">
+          <div className="mb-2 flex items-center justify-between">
+            <label className="text-sm font-medium text-slate-200">Staking Strategy</label>
+            <span className="text-xs font-semibold text-emerald-400">
               {(fraction * 100).toFixed(0)}% Kelly
             </span>
           </div>
-          
-          <input 
-            type="range" 
-            min="0.1" max="1" step="0.1" 
+
+          <input
+            type="range"
+            min="0.1"
+            max="1"
+            step="0.1"
             value={fraction}
             onChange={(e) => setFraction(parseFloat(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black mb-4"
+            className="mb-4 w-full cursor-pointer accent-emerald-500"
           />
 
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="mb-1 block text-sm font-medium text-slate-200">
             Stake Amount (DKK)
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-2 text-gray-500">kr</span>
+            <span className="absolute left-3 top-2.5 text-slate-500">kr</span>
             <input
               type="number"
               value={stake}
               onChange={(e) => setStake(e.target.value)}
-              className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:border-transparent outline-none font-mono"
+              className="input w-full pl-8 pr-4 font-mono"
             />
           </div>
-          <div className="flex justify-between mt-2 text-xs text-gray-500">
+          <div className="mt-2 flex justify-between text-xs text-slate-500">
             <p>Raw Kelly: {rawStake.toFixed(2)}</p>
-            <p className="font-medium text-black">Rounded: {suggestedStake}</p>
+            <p className="font-medium text-slate-300">Rounded: {suggestedStake}</p>
           </div>
         </div>
 
         {/* ACTIONS */}
         <div className="flex gap-3">
-          <button 
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition"
-          >
+          <button onClick={onClose} className="btn btn-ghost flex-1">
             Cancel
           </button>
-          <button 
+          <button
             onClick={() => isStakeValid && onConfirm(parseFloat(stake))}
             disabled={!isStakeValid} // Disable HTML button
-            className={`flex-1 px-4 py-2 rounded-md transition font-medium text-white
-              ${isStakeValid 
-                ? "bg-black hover:bg-gray-800" // Active Style
-                : "bg-gray-300 cursor-not-allowed" // Disabled Style
-              }
-            `}
+            className="btn btn-primary flex-1"
           >
             Place Bet
           </button>
         </div>
-
       </div>
     </div>
   );

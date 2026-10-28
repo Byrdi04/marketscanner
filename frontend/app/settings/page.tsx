@@ -176,17 +176,17 @@ export default function Settings() {
         key={rule.rule_number}
         className={`border rounded-lg p-5 transition-colors ${
           rule.enabled
-            ? "border-gray-300 bg-white"
-            : "border-gray-200 bg-gray-50 opacity-70"
+            ? "border-slate-600 bg-slate-900"
+            : "border-slate-800 bg-slate-900/50 opacity-70"
         }`}
       >
         {/* Rule Header */}
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-gray-800">{rule.name?.trim() || `Rule ${rule.rule_number}`}</h3>
+          <h3 className="font-semibold text-slate-200">{rule.name?.trim() || `Rule ${rule.rule_number}`}</h3>
           <button
             onClick={() => updateRule(rule.rule_number, { enabled: !rule.enabled })}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              rule.enabled ? "bg-gray-900" : "bg-gray-300"
+              rule.enabled ? "bg-emerald-500" : "bg-slate-700"
             }`}
           >
             <span
@@ -199,8 +199,8 @@ export default function Settings() {
 
         {/* Min EV */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Min EV: <span className="font-mono text-gray-900">{rule.min_ev}%</span>
+          <label className="block text-sm font-medium text-slate-300 mb-1">
+            Min EV: <span className="font-mono text-slate-100">{rule.min_ev}%</span>
           </label>
           <input
             type="range"
@@ -211,9 +211,9 @@ export default function Settings() {
             onChange={(e) =>
               updateRule(rule.rule_number, { min_ev: parseFloat(e.target.value) })
             }
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+            className="w-full cursor-pointer accent-emerald-500"
           />
-          <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <div className="flex justify-between text-xs text-slate-500 mt-1">
             <span>0%</span>
             <span>10%</span>
           </div>
@@ -221,8 +221,8 @@ export default function Settings() {
 
         {/* Max EV */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Max EV: <span className="font-mono text-gray-900">{rule.max_ev}%</span>
+          <label className="block text-sm font-medium text-slate-300 mb-1">
+            Max EV: <span className="font-mono text-slate-100">{rule.max_ev}%</span>
           </label>
           <input
             type="range"
@@ -233,9 +233,9 @@ export default function Settings() {
             onChange={(e) =>
               updateRule(rule.rule_number, { max_ev: parseFloat(e.target.value) })
             }
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+            className="w-full cursor-pointer accent-emerald-500"
           />
-          <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <div className="flex justify-between text-xs text-slate-500 mt-1">
             <span>0%</span>
             <span>10%</span>
           </div>
@@ -244,7 +244,7 @@ export default function Settings() {
         {/* Odds Range */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
+            <label className="block text-xs font-medium text-slate-300 mb-1">
               Min Odds
             </label>
             <input
@@ -256,11 +256,11 @@ export default function Settings() {
               onChange={(e) =>
                 updateRule(rule.rule_number, { min_odds: parseFloat(e.target.value) })
               }
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="input font-mono"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
+            <label className="block text-xs font-medium text-slate-300 mb-1">
               Max Odds
             </label>
             <input
@@ -272,14 +272,14 @@ export default function Settings() {
               onChange={(e) =>
                 updateRule(rule.rule_number, { max_odds: parseFloat(e.target.value) })
               }
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="input font-mono"
             />
           </div>
         </div>
 
         {/* Market Types */}
         <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-700 mb-2">
+          <label className="block text-xs font-medium text-slate-300 mb-2">
             Markets
           </label>
           <div className="flex gap-2">
@@ -289,8 +289,8 @@ export default function Settings() {
                 onClick={() => toggleRuleMarket(rule.rule_number, market)}
                 className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
                   rule.market_types.includes(market)
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
+                    ? "bg-emerald-500 text-slate-950 border-emerald-500"
+                    : "bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-500/60"
                 }`}
               >
                 {market}
@@ -302,15 +302,15 @@ export default function Settings() {
         {/* Time Window */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-xs font-medium text-gray-700">
+            <label className="block text-xs font-medium text-slate-300">
               Time Before Tip-Off
             </label>
             <button
               onClick={() => toggleTimeFilter(rule.rule_number, !hasTimeFilter)}
               className={`text-xs px-2 py-0.5 rounded border transition-colors ${
                 hasTimeFilter
-                  ? "bg-gray-900 text-white border-gray-900"
-                  : "bg-white text-gray-500 border-gray-300 hover:border-gray-500"
+                  ? "bg-emerald-500 text-slate-950 border-emerald-500"
+                  : "bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-500/60"
               }`}
             >
               {hasTimeFilter ? "Active" : "Off"}
@@ -326,7 +326,7 @@ export default function Settings() {
                     min_minutes: parseInt(e.target.value),
                   })
                 }
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                className="input !px-2 !py-1.5 !text-sm"
               >
                 {TIME_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -334,7 +334,7 @@ export default function Settings() {
                   </option>
                 ))}
               </select>
-              <span className="text-sm text-gray-500">to</span>
+              <span className="text-sm text-slate-400">to</span>
               <select
                 value={rule.max_minutes ?? 60}
                 onChange={(e) =>
@@ -342,7 +342,7 @@ export default function Settings() {
                     max_minutes: parseInt(e.target.value),
                   })
                 }
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                className="input !px-2 !py-1.5 !text-sm"
               >
                 {TIME_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -350,12 +350,12 @@ export default function Settings() {
                   </option>
                 ))}
               </select>
-              <span className="text-sm text-gray-500">before tip-off</span>
+              <span className="text-sm text-slate-400">before tip-off</span>
             </div>
           )}
 
           {!hasTimeFilter && (
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-slate-500">
               No time filter — all games qualify regardless of start time
             </p>
           )}
@@ -367,28 +367,30 @@ export default function Settings() {
   // ---- PAGE ----
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
-      <div className="max-w-3xl mx-auto">
+    <main className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      <div className="mx-auto max-w-3xl px-4 py-6 md:px-6 lg:py-8">
         {/* HEADER */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-          <div className="flex gap-4 mt-1 text-sm">
-            <Link href="/" className="text-blue-600 hover:underline">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
+            Settings
+          </h1>
+          <div className="mt-2 flex gap-4 text-sm">
+            <Link href="/" className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline">
               ← Back to Scanner
             </Link>
           </div>
         </div>
 
         {/* GLOBAL SETTINGS CARD */}
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-6 mb-6">
+        <div className="card p-6 mb-6">
           <h2 className="text-lg font-semibold mb-1">Push Notifications</h2>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-slate-400 mb-6">
             Delivered via{" "}
             <a
               href="https://ntfy.sh"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
+              className="text-emerald-400 hover:text-emerald-300 hover:underline"
             >
               ntfy.sh
             </a>
@@ -399,15 +401,15 @@ export default function Settings() {
             {/* ENABLE TOGGLE */}
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium text-gray-800">Enable Notifications</p>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="font-medium text-slate-200">Enable Notifications</p>
+                <p className="text-xs text-slate-500 mt-0.5">
                   Master switch — alerts fire on each scheduled scan
                 </p>
               </div>
               <button
                 onClick={() => setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  config.enabled ? "bg-gray-900" : "bg-gray-300"
+                  config.enabled ? "bg-emerald-500" : "bg-slate-700"
                 }`}
               >
                 <span
@@ -420,7 +422,7 @@ export default function Settings() {
 
             {/* NTFY TOPIC */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-slate-300 mb-1">
                 Ntfy Topic
               </label>
               <input
@@ -430,18 +432,18 @@ export default function Settings() {
                   setConfig((prev) => ({ ...prev, ntfy_topic: e.target.value }))
                 }
                 placeholder="e.g. nba-scanner-abc123"
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                className="input"
               />
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-slate-500 mt-1">
                 Must match the topic you subscribed to in the Ntfy app
               </p>
             </div>
 
             {/* COOLDOWN */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-slate-300 mb-1">
                 Cooldown:{" "}
-                <span className="font-mono text-gray-900">
+                <span className="font-mono text-slate-100">
                   {config.cooldown_minutes} min
                 </span>
               </label>
@@ -457,13 +459,13 @@ export default function Settings() {
                     cooldown_minutes: parseInt(e.target.value),
                   }))
                 }
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+                className="w-full cursor-pointer accent-emerald-500"
               />
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
+              <div className="flex justify-between text-xs text-slate-500 mt-1">
                 <span>30m</span>
                 <span>4h</span>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-slate-500 mt-1">
                 Minimum time between repeat alerts for the same unchanged bet
               </p>
             </div>
@@ -474,7 +476,7 @@ export default function Settings() {
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
-              className="bg-gray-900 text-white px-5 py-2 rounded hover:bg-gray-700 disabled:opacity-50 text-sm font-medium"
+              className="btn btn-primary"
             >
               {saveStatus === "saving" && "Saving..."}
               {saveStatus === "saved" && "Saved!"}
@@ -485,7 +487,7 @@ export default function Settings() {
             <button
               onClick={handleTest}
               disabled={testStatus === "sending"}
-              className="bg-gray-100 text-gray-700 px-5 py-2 rounded hover:bg-gray-200 disabled:opacity-50 text-sm font-medium"
+              className="btn btn-ghost"
             >
               {testStatus === "sending" && "Sending..."}
               {testStatus === "sent" && "Sent! Check your phone"}
@@ -496,17 +498,17 @@ export default function Settings() {
         </div>
 
         {/* PAPER TRADING SETTINGS CARD */}
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-6 mb-6">
+        <div className="card p-6 mb-6">
           <h2 className="text-lg font-semibold mb-1">Paper Trading</h2>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-slate-400 mb-6">
             Configure how many historical paper bets are loaded for analysis.
             Higher numbers give better data but use more memory.
           </p>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-slate-300 mb-1">
               Bet History Limit:{" "}
-              <span className="font-mono text-gray-900">
+              <span className="font-mono text-slate-100">
                 {config.paper_bets_limit.toLocaleString()}
               </span>
             </label>
@@ -522,13 +524,13 @@ export default function Settings() {
                   paper_bets_limit: parseInt(e.target.value),
                 }))
               }
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
+              className="w-full cursor-pointer accent-emerald-500"
             />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <div className="flex justify-between text-xs text-slate-500 mt-1">
               <span>500</span>
               <span>50,000</span>
             </div>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-slate-500 mt-1">
               Default: 5,000 bets. Higher values will load more data into the browser.
             </p>
           </div>
@@ -537,7 +539,7 @@ export default function Settings() {
         {/* RULES CARDS */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-1">Notification Rules</h2>
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-sm text-slate-400 mb-4">
             A bet triggers a notification if it matches <strong>either</strong> rule.
             Each rule has its own filters.
           </p>
@@ -547,52 +549,54 @@ export default function Settings() {
         </div>
 
         {/* NOTIFICATION LOG CARD */}
-        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
+        <div className="card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-800">
             <h2 className="text-lg font-semibold">Recent Notifications</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5">
               Last 20 alerts sent by the scanner
             </p>
           </div>
 
           {log.length === 0 ? (
-            <div className="px-6 py-10 text-center text-gray-400 text-sm">
+            <div className="px-6 py-10 text-center text-sm text-slate-500">
               No notifications sent yet.
             </div>
           ) : (
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-100 text-gray-600 font-medium border-b">
-                <tr>
-                  <th className="px-6 py-3">Sent At</th>
-                  <th className="px-6 py-3">Bet</th>
-                  <th className="px-6 py-3 text-right">Odds</th>
-                  <th className="px-6 py-3 text-right">EV</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {log.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-400 text-xs whitespace-nowrap">
-                      {new Date(entry.notified_at).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 text-gray-700 font-mono text-xs">
-                      {entry.bet_key}
-                    </td>
-                    <td className="px-6 py-4 text-right font-mono">
-                      {entry.danske_odds.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-right font-mono text-green-600 font-medium">
-                      +{entry.ev_percent.toFixed(1)}%
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="data-table text-sm">
+                <thead className="border-b border-slate-700/80 bg-slate-900/80 font-medium text-slate-400">
+                  <tr>
+                    <th className="px-6 py-3">Sent At</th>
+                    <th className="px-6 py-3">Bet</th>
+                    <th className="px-6 py-3 text-right">Odds</th>
+                    <th className="px-6 py-3 text-right">EV</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {log.map((entry) => (
+                    <tr key={entry.id} className="transition-colors hover:bg-slate-800/40">
+                      <td data-label="Sent" className="whitespace-nowrap px-6 py-4 text-xs text-slate-500">
+                        {new Date(entry.notified_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td data-label="Bet" className="break-all px-6 py-4 font-mono text-xs text-slate-300">
+                        {entry.bet_key}
+                      </td>
+                      <td data-label="Odds" className="px-6 py-4 text-right font-mono">
+                        {entry.danske_odds.toFixed(2)}
+                      </td>
+                      <td data-label="EV" className="px-6 py-4 text-right font-mono font-medium text-emerald-400">
+                        +{entry.ev_percent.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

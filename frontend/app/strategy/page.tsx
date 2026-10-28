@@ -299,23 +299,41 @@ const changeMaxOdds = (raw: number) => {
 
   /* ------------------------------ derived ------------------------------ */
   return (
-    <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
-      <div className="max-w-6xl mx-auto">
+    <main className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 lg:py-8">
         {/* HEADER */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold tracking-tight">Strategy Analysis</h1>
-          <div className="flex gap-4 mt-2 text-sm">
-            <Link href="/" className="text-blue-600 hover:underline">← Scanner</Link>
-            <span className="text-gray-300">|</span>
-            <Link href="/paper-trading" className="text-purple-600 hover:underline">Paper Trading 🤖</Link>
-            <Link href="/analytics" className="text-blue-600 hover:underline">Analytics 📊</Link>
-            <span className="text-gray-400 ml-auto text-xs self-center">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
+            Strategy Analysis
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <Link
+              href="/"
+              className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              ← Scanner
+            </Link>
+            <span className="text-slate-600">•</span>
+            <Link
+              href="/paper-trading"
+              className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              Paper Trading
+            </Link>
+            <span className="text-slate-600">•</span>
+            <Link
+              href="/analytics"
+              className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              Analytics
+            </Link>
+            <span className="w-full text-xs text-slate-500 sm:ml-auto sm:w-auto">
               Already-collected paper bets only · no extra API credits
             </span>
           </div>
 
           {/* TABS */}
-          <div className="flex gap-2 mt-4">
+          <div className="mt-4 flex flex-wrap gap-2">
             {([
               ["evidence", "Evidence tables"],
               ["model", "Model & Frontier"],
@@ -323,10 +341,10 @@ const changeMaxOdds = (raw: number) => {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${
+                className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                   tab === key
-                    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400"
+                    ? "border-emerald-500 bg-emerald-500 text-slate-950"
+                    : "border-slate-700 bg-slate-800/60 text-slate-300 hover:border-emerald-500/60"
                 }`}
               >
                 {label}
@@ -336,11 +354,11 @@ const changeMaxOdds = (raw: number) => {
         </div>
 
         {/* CONTROLS */}
-        <section className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6">
+        <section className="card mb-6 p-5">
           {/* RULE SELECTOR */}
-          <div className="flex flex-wrap items-end gap-3 mb-4 p-3 rounded-md bg-gray-50 border border-gray-200">
+          <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-slate-700 bg-slate-800/40 p-3">
             <label className="block min-w-64 flex-1">
-              <span className="text-xs uppercase font-semibold text-gray-500">
+              <span className="text-xs uppercase font-semibold text-slate-500">
                 Saved rule — loads its filters to see the outcome
               </span>
               <select
@@ -354,7 +372,7 @@ const changeMaxOdds = (raw: number) => {
                     if (rule) applyRule(rule);
                   }
                 }}
-                className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white"
+                className="select mt-1"
               >
                 <option value="">🎯 Free selection — no rule applied; sliders won't edit any saved rule</option>
                 {rules.map((r) => (
@@ -367,7 +385,7 @@ const changeMaxOdds = (raw: number) => {
 
             <button
               onClick={handleSaveAsNewRule}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border border-emerald-600 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+              className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
             >
               ＋ Save current as new rule
             </button>
@@ -375,7 +393,7 @@ const changeMaxOdds = (raw: number) => {
             <button
               onClick={handleSaveRules}
               disabled={ruleSaveState === "saving" || !rulesDirty}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border border-sky-500/40 text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 disabled:opacity-50 transition-colors"
             >
               {ruleSaveState === "saving" && "Saving…"}
               {ruleSaveState === "saved" && "Rules saved ✓"}
@@ -386,13 +404,13 @@ const changeMaxOdds = (raw: number) => {
             {activeRuleNumber != null && (
               <button
                 onClick={handleDeleteRule}
-                className="px-3 py-1.5 rounded-md text-sm font-medium border border-red-300 text-red-600 bg-white hover:bg-red-50 transition-colors"
+                className="px-3 py-1.5 rounded-md text-sm font-medium border border-rose-500/30 text-rose-300 bg-transparent hover:bg-rose-500/10 transition-colors"
               >
                 Delete rule
               </button>
             )}
 
-            <p className="w-full text-xs text-gray-400">
+            <p className="w-full text-xs text-slate-500">
               {activeRuleNumber == null
                 ? "Free selection: adjust the filters freely — saved rules are untouched until you edit them with a rule selected."
                 : `Editing "${ruleDisplayName(rules.find((r) => r.rule_number === activeRuleNumber) ?? { rule_number: activeRuleNumber, name: null })}" — slider changes update that rule; press “Save rules” to persist."`}
@@ -401,11 +419,11 @@ const changeMaxOdds = (raw: number) => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">Dedup (correlated bets)</span>
+              <span className="text-xs uppercase font-semibold text-slate-500">Dedup (correlated bets)</span>
               <select
                 value={dedup}
                 onChange={(e) => setDedup(e.target.value)}
-                className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white"
+                className="select mt-1"
               >
                 {DEDUP_MODES.map((m) => (
                   <option key={m.value} value={m.value}>{m.label}</option>
@@ -414,69 +432,69 @@ const changeMaxOdds = (raw: number) => {
             </label>
 
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">
+              <span className="text-xs uppercase font-semibold text-slate-500">
                 Min EV: <b>{minEv}%</b>
               </span>
               <input
                 type="range" min={RULE_EV_MIN} max={RULE_EV_MAX} step={0.5} value={minEv}
                 onChange={(e) => changeMinEv(Number(e.target.value))}
-                className="w-full mt-2 accent-blue-600"
+                className="w-full mt-2 accent-emerald-500"
               />
             </label>
 
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">
+              <span className="text-xs uppercase font-semibold text-slate-500">
                 Max EV: <b>{maxEv}%</b>
               </span>
               <input
                 type="range" min={RULE_EV_MIN} max={RULE_EV_MAX} step={0.5} value={maxEv}
                 onChange={(e) => changeMaxEv(Number(e.target.value))}
-                className="w-full mt-2 accent-blue-600"
+                className="w-full mt-2 accent-emerald-500"
               />
             </label>
 
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">
+              <span className="text-xs uppercase font-semibold text-slate-500">
                 Bet placed ≥ <b>{minHours}h</b> before start
               </span>
               <input
                 type="range" min={RULE_HOUR_MIN} max={RULE_HOUR_MAX} step={1} value={minHours}
                 onChange={(e) => changeMinHours(Number(e.target.value))}
-                className="w-full mt-2 accent-blue-600"
+                className="w-full mt-2 accent-emerald-500"
               />
             </label>
 
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">
+              <span className="text-xs uppercase font-semibold text-slate-500">
                 Bet placed ≤ <b>{maxHours}h</b> before start
               </span>
               <input
                 type="range" min={RULE_HOUR_MIN} max={RULE_HOUR_MAX} step={1} value={maxHours}
                 onChange={(e) => changeMaxHours(Number(e.target.value))}
-                className="w-full mt-2 accent-blue-600"
+                className="w-full mt-2 accent-emerald-500"
               />
             </label>
 
             <label className="block">
-              <span className="text-xs uppercase font-semibold text-gray-500">Odds range</span>
+              <span className="text-xs uppercase font-semibold text-slate-500">Odds range</span>
               <div className="flex items-center gap-2 mt-1">
                 <input
                   type="number" min={1.9} max={2.4} step={0.01} value={minOdds}
                   onChange={(e) => changeMinOdds(Number(e.target.value))}
-                  className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                  className="input !w-20 !px-2 !py-1.5"
                 />
-                <span className="text-gray-400">–</span>
+                <span className="text-slate-500">–</span>
                 <input
                   type="number" min={1.9} max={2.4} step={0.01} value={maxOdds}
                   onChange={(e) => changeMaxOdds(Number(e.target.value))}
-                  className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                  className="input !w-20 !px-2 !py-1.5"
                 />
               </div>
             </label>
           </div>
-          {loading && <p className="text-xs text-gray-400 mt-3">Recalculating…</p>}
+          {loading && <p className="text-xs text-slate-500 mt-3">Recalculating…</p>}
           {error && (
-            <p className="text-xs text-red-600 mt-3">Error: {error} — is the backend running?</p>
+            <p className="text-xs text-rose-400 mt-3">Error: {error} — is the backend running?</p>
           )}
         </section>
 
@@ -497,7 +515,7 @@ const changeMaxOdds = (raw: number) => {
 function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: boolean }) {
   if (!data?.overall) {
     return loading ? null : (
-      <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-6 text-amber-300">
         No settled paper bets found. Data will appear once bets have been settled.
       </div>
     );
@@ -513,19 +531,19 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
         <Card
           label="ROI (unit stake)"
           value={`${data.overall.roi >= 0 ? "+" : ""}${data.overall.roi}%`}
-          valueClass={data.overall.roi >= 0 ? "text-green-600" : "text-red-600"}
+          valueClass={data.overall.roi >= 0 ? "text-emerald-400" : "text-rose-400"}
           sub={`95% CI [${data.overall.ci_low}%, ${data.overall.ci_high}%]`}
         />
         <Card
           label="Avg CLV"
           value={data.overall.avg_clv == null ? "–" : `${data.overall.avg_clv >= 0 ? "+" : ""}${data.overall.avg_clv}%`}
-          valueClass={(data.overall.avg_clv ?? 0) >= 0 ? "text-green-600" : "text-yellow-600"}
+          valueClass={(data.overall.avg_clv ?? 0) >= 0 ? "text-emerald-400" : "text-amber-400"}
         />
       </div>
 
       {/* POOL QUALITY */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 text-xs text-gray-600">
-        <span className="font-semibold text-gray-700 uppercase tracking-wide text-[10px]">Pool composition under current filters — </span>
+      <div className="card mb-6 p-4 text-xs text-slate-400">
+        <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Pool composition under current filters — </span>
         {data.meta.total_logged.toLocaleString()} logged · {data.meta.n_pending_excluded} pending excluded ·{" "}
         {data.meta.n_settled.toLocaleString()} settled · {data.meta.n_duplicates_excluded.toLocaleString()} duplicates excluded ·{" "}
         {data.meta.n_filtered_out.toLocaleString()} filtered out by thresholds ·{" "}
@@ -535,19 +553,19 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
 
       {/* CALIBRATION */}
       <Section title="Calibration: Pinnacle fair price vs realized win rate" id="calibration">
-        <p className="text-sm text-gray-500 mb-3">
+        <p className="text-sm text-slate-500 mb-3">
           If the EV math were perfectly honest, realized win rate would sit on the dashed 45° line. Points below it mean
           those bets were over-priced (the fair probability was too generous).
         </p>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.calibration}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-              <XAxis dataKey="implied_pct" type="number" domain={[40, 55]} tickFormatter={(v) => `${v}%`} />
-              <YAxis domain={[35, 65]} tickFormatter={(v) => `${v}%`} />
-              <Tooltip formatter={(v: number) => `${v}%`} labelFormatter={(v) => `Implied ${v}%`} />
-              <ReferenceLine segment={[{ x: 40, y: 40 }, { x: 55, y: 55 }]} stroke="#999" strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="realized_pct" stroke="#2563eb" strokeWidth={2} dot={{ r: 4 }} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+              <XAxis dataKey="implied_pct" type="number" domain={[40, 55]} tickFormatter={(v) => `${v}%`} tick={{ fill: "#94a3b8" }} />
+              <YAxis domain={[35, 65]} tickFormatter={(v) => `${v}%`} tick={{ fill: "#94a3b8" }} />
+              <Tooltip formatter={(v: number) => `${v}%`} labelFormatter={(v) => `Implied ${v}%`} contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }} />
+              <ReferenceLine segment={[{ x: 40, y: 40 }, { x: 55, y: 55 }]} stroke="#475569" strokeDasharray="4 4" />
+              <Line type="monotone" dataKey="realized_pct" stroke="#38bdf8" strokeWidth={2} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -569,9 +587,9 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
         if (!dim) return null;
         return (
           <Section key={key} title={`ROI by ${dim.title}`} id={key}>
-            <p className="text-sm text-gray-500 mb-3">{DIMENSION_BLURB[key] ?? ""}</p>
+            <p className="text-sm text-slate-500 mb-3">{DIMENSION_BLURB[key] ?? ""}</p>
             {dim.rows.length === 0 ? (
-              <p className="text-sm text-gray-400">No bets in this view.</p>
+              <p className="text-sm text-slate-500">No bets in this view.</p>
             ) : (
               <>
                 <RoiChart rows={dim.rows} />
@@ -588,7 +606,7 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
                       render: (r) => {
                         const roi = Number(r.roi);
                         return (
-                          <span className={roi >= 0 ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
+                          <span className={roi >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
                             {roi > 0 ? "+" : ""}{roi}%
                           </span>
                         );
@@ -619,7 +637,7 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
       {/* CORRELATIONS */}
       {data.correlations.length > 0 && (
         <Section title="Feature correlations (diagnostic)" id="correlations">
-          <p className="text-sm text-gray-500 mb-3">
+          <p className="text-sm text-slate-500 mb-3">
             Correlation of each feature with winning and with per-bet profit. Near-zero values mean the feature does
             not linearly explain outcomes at this sample size.
           </p>
@@ -638,7 +656,7 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
       )}
 
       {/* INTERPRETATION */}
-      <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg text-xs text-blue-900 leading-relaxed">
+      <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-4 text-xs leading-relaxed text-sky-100">
         <b>How to read this.</b> The number of bets per month is what any strategy costs: stricter filters shrink the
         pool (larger CIs), looser filters grow it (statistically more stable, but you bet the whole +EV universe,
         which in this 3.5-month capture was roughly break-even to negative). No single bin here is a strategy yet —
@@ -678,14 +696,14 @@ function ModelTab({ modelData, sweepData, loading }: {
   }, [sweepData]);
 
   if (!model) return loading ? null : (
-    <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-6 text-amber-300">
       Model data not available. Is the backend running?
     </div>
   );
 
   if (model.available === false) {
     return (
-      <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-6 text-amber-300">
         Modelling requires <code>scikit-learn</code> on the backend. Add it to{" "}
         <code>backend/requirements.txt</code> and restart.
       </div>
@@ -694,7 +712,7 @@ function ModelTab({ modelData, sweepData, loading }: {
 
   if (model.error) {
     return (
-      <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">{model.error}</div>
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-6 text-amber-300">{model.error}</div>
     );
   }
 
@@ -705,8 +723,8 @@ function ModelTab({ modelData, sweepData, loading }: {
   return (
     <>
       {/* TEMPORAL SPLIT */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 text-xs text-gray-600">
-        <span className="font-semibold text-gray-700 uppercase tracking-wide text-[10px]">Temporal validation — </span>
+      <div className="card mb-6 p-4 text-xs text-slate-400">
+        <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Temporal validation — </span>
         trained on bets before <b>{model.meta?.cutoff}</b> ({model.meta?.train_n} bets), tested on bets after{" "}
         <b>{model.meta?.cutoff}</b> ({model.meta?.holdout_n} bets, {h?.months} months). The holdout is the only
         timespan that matters when judging whether a rule works.
@@ -720,7 +738,7 @@ function ModelTab({ modelData, sweepData, loading }: {
           <Card
             label="Holdout ROI (unit stake)"
             value={`${h.roi >= 0 ? "+" : ""}${h.roi}%`}
-            valueClass={h.roi >= 0 ? "text-green-600" : "text-red-600"}
+            valueClass={h.roi >= 0 ? "text-emerald-400" : "text-rose-400"}
           />
           <Card label="Holdout bets/mo" value={`${h.bets_per_month}`} />
           {model.clv_model?.r2 != null && (
@@ -754,7 +772,7 @@ function ModelTab({ modelData, sweepData, loading }: {
             </>
           )}
         </div>
-        <p className="text-xs text-gray-500 mt-3 leading-relaxed">
+        <p className="text-xs text-slate-500 mt-3 leading-relaxed">
           Lower log loss = better calibrated predictions. In this capture the logistic model is only barely better than
           the flat baseline, and the boosted model is worse out-of-sample — the honest expectation at this sample size.
           That means a simple threshold rule remains the right deployment vehicle.
@@ -782,7 +800,7 @@ function ModelTab({ modelData, sweepData, loading }: {
               },
             ]}
           />
-          <p className="text-xs text-gray-500 mt-3">
+          <p className="text-xs text-slate-500 mt-3">
             Positive win coef = more likely to win at fixed odds (EV effect is positive but small). The CLV model is
             strongly driven by odds magnitude (prices that close away from the taken price), and by EV.
           </p>
@@ -795,16 +813,16 @@ function ModelTab({ modelData, sweepData, loading }: {
           <div className="h-64 mb-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={decileData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <XAxis dataKey="decile" tick={{ fontSize: 12 }} label={{ value: "Decile (1 = lowest predicted win prob)", position: "insideBottom", offset: -2, fontSize: 11 }} />
-                <YAxis tickFormatter={(v) => `${v}%`} />
-                <Tooltip formatter={(v: number, name: string) => (name === "ci_error" ? null : [`${v}%`, "Win rate"])} labelFormatter={(l) => `Decile ${l}`} />
-                <ReferenceLine y={50} stroke="#999" strokeDasharray="3 3" />
-                <Bar dataKey="win_rate" fill="#2563eb" radius={[3, 3, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                <XAxis dataKey="decile" tick={{ fill: "#94a3b8", fontSize: 12 }} label={{ value: "Decile (1 = lowest predicted win prob)", position: "insideBottom", offset: -2, fontSize: 11, fill: "#94a3b8" }} />
+                <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: "#94a3b8" }} />
+                <Tooltip formatter={(v: number, name: string) => (name === "ci_error" ? null : [`${v}%`, "Win rate"])} labelFormatter={(l) => `Decile ${l}`} contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }} />
+                <ReferenceLine y={50} stroke="#475569" strokeDasharray="3 3" />
+                <Bar dataKey="win_rate" fill="#38bdf8" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-slate-500 mb-3">
             If the model ranked perfectly, win rate would rise from left to right. Here it is noisy — again the
             signature of weak signal at this sample size.
           </p>
@@ -820,7 +838,7 @@ function ModelTab({ modelData, sweepData, loading }: {
                 render: (r) => {
                   const roi = Number(r.roi);
                   return (
-                    <span className={roi >= 0 ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
+                    <span className={roi >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
                       {roi > 0 ? "+" : ""}{roi}%
                     </span>
                   );
@@ -833,7 +851,7 @@ function ModelTab({ modelData, sweepData, loading }: {
 
       {/* FRONTIER */}
       <Section title="Frontier: bets per month vs holdout ROI" id="frontier">
-        <p className="text-sm text-gray-500 mb-3">
+        <p className="text-sm text-slate-500 mb-3">
           Every candidate rule {`"EV ≥ x · taken ≥ y hours before start"`} plotted on the temporal holdout. This is the
           bets-vs-most-efficient-strategy trade-off: more bets per month = tighter CIs but you bet the whole +EV
           universe; fewer = higher ROI point estimates but razor-thin samples. Pick the least restrictive rule whose
@@ -843,12 +861,13 @@ function ModelTab({ modelData, sweepData, loading }: {
           <div className="h-80 mb-4">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart margin={{ top: 10, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
                 <XAxis
                   type="number" dataKey="bets_per_month" scale="log" domain={[5, 700]} allowDataOverflow
-                  label={{ value: "Bets per month (log scale)", position: "insideBottom", offset: -2, fontSize: 11 }}
+                  label={{ value: "Bets per month (log scale)", position: "insideBottom", offset: -2, fontSize: 11, fill: "#94a3b8" }}
+                  tick={{ fill: "#94a3b8", fontSize: 12 }}
                 />
-                <YAxis tickFormatter={(v) => `${v}%`} domain={[-20, 40]} />
+                <YAxis tickFormatter={(v) => `${v}%`} domain={[-20, 40]} tick={{ fill: "#94a3b8" }} />
                 <Tooltip
                   formatter={(v: number, name: string) => (name === "roi" ? [`${v}% ROI`, "ROI"] : null)}
                   labelFormatter={(l) => `~${Math.round(Number(l))} bets/mo`}
@@ -857,18 +876,18 @@ function ModelTab({ modelData, sweepData, loading }: {
                     if (!isActive || !payload?.length) return null;
                     const p = payload[0].payload;
                     return (
-                      <div className="bg-white p-3 border border-gray-200 shadow-lg rounded text-xs">
+                      <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs shadow-xl shadow-black/40">
                         <p className="font-bold mb-1">{p.rule}</p>
                         <p>Bets: {p.n} · ~{p.bets_per_month}/mo</p>
                         <p className="font-semibold">
-                          ROI: <span className={p.roi >= 0 ? "text-green-600" : "text-red-600"}>{p.roi}%</span>{" "}
-                          <span className="text-gray-400">[{p.ci_low}%, {p.ci_high}%]</span>
+                          ROI: <span className={p.roi >= 0 ? "text-emerald-400" : "text-rose-400"}>{p.roi}%</span>{" "}
+                          <span className="text-slate-500">[{p.ci_low}%, {p.ci_high}%]</span>
                         </p>
                       </div>
                     );
                   }}
                 />
-                <ReferenceLine y={0} stroke="#999" strokeDasharray="3 3" />
+                <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
                 {frontierSeries.map((s) => (
                   <Line
                     key={s.ev}
@@ -878,12 +897,12 @@ function ModelTab({ modelData, sweepData, loading }: {
                     strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
                   />
                 ))}
-                <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: 12 }} />
+                <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No sweep rows for these filters.</p>
+          <p className="text-sm text-slate-500">No sweep rows for these filters.</p>
         )}
 
         {sweepData?.rows?.length ? (
@@ -899,7 +918,7 @@ function ModelTab({ modelData, sweepData, loading }: {
                 render: (r) => {
                   const roi = Number(r.roi);
                   return (
-                    <span className={roi >= 0 ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
+                    <span className={roi >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
                       {roi > 0 ? "+" : ""}{roi}%
                     </span>
                   );
@@ -915,7 +934,7 @@ function ModelTab({ modelData, sweepData, loading }: {
           />
         ) : null}
 
-        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mt-4 text-xs text-blue-900 leading-relaxed">
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-4 text-xs leading-relaxed text-sky-100">
           <b>Honest read of this sweep.</b> The high-ROI cells (EV ≥ 3–5%, late windows) have 10–70 holdout bets — a
           single lucky stretch moves them by double digits. No cell&apos;s 95% CI excludes 0. The robust message is the
           shape: rules between ~60 and ~150 bets/month (EV ≥ 2–3%, T ≥ 6–12h) sit consistently positive in this
@@ -930,14 +949,14 @@ function ModelTab({ modelData, sweepData, loading }: {
 /* Small building blocks                                               */
 /* ------------------------------------------------------------------ */
 
-function Card({ label, value, valueClass = "text-gray-900", sub }: {
+function Card({ label, value, valueClass = "text-slate-100", sub }: {
   label: string; value: string; valueClass?: string; sub?: string;
 }) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-      <p className="text-[10px] text-gray-500 uppercase font-semibold">{label}</p>
+    <div className="card p-4">
+      <p className="text-[10px] text-slate-500 uppercase font-semibold">{label}</p>
       <p className={`text-xl font-bold mt-1 ${valueClass}`}>{value}</p>
-      {sub && <p className="text-[10px] text-gray-400 mt-1">{sub}</p>}
+      {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
     </div>
   );
 }
@@ -946,18 +965,18 @@ function MetricBox({ label, value, sub, accent = "gray" }: {
   label: string; value: string; sub?: string; accent?: "green" | "gray";
 }) {
   return (
-    <div className={`rounded-lg border p-4 ${accent === "green" ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}>
-      <p className="text-[10px] text-gray-500 uppercase font-semibold">{label}</p>
+    <div className={`rounded-lg border p-4 ${accent === "green" ? "border-emerald-500/30 bg-emerald-500/10" : "border-slate-700 bg-slate-800/50"}`}>
+      <p className="text-[10px] text-slate-500 uppercase font-semibold">{label}</p>
       <p className="text-2xl font-bold mt-1 font-mono">{value}</p>
-      {sub && <p className="text-[10px] text-gray-500 mt-1">{sub}</p>}
+      {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
     </div>
   );
 }
 
 function Section({ title, id, children }: { title: string; id: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
-      <h2 className="text-lg font-bold text-gray-700 mb-2">{title}</h2>
+    <section id={id} className="card mb-6 p-5 sm:p-6">
+      <h2 className="text-lg font-bold text-slate-300 mb-2">{title}</h2>
       {children}
     </section>
   );
@@ -969,19 +988,20 @@ function RoiChart({ rows }: { rows: RoiRow[] }) {
     <div className="h-64 mb-4">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-          <XAxis dataKey="bin" tick={{ fontSize: 12 }} />
-          <YAxis tickFormatter={(v) => `${v}%`} />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+          <XAxis dataKey="bin" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+          <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: "#94a3b8" }} />
           <Tooltip
             formatter={(v: number, name: string) => (name === "ci_error" ? null : [`${v}% ROI`, "ROI"])}
             labelFormatter={(l) => `Bin: ${l}`}
+            contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }}
           />
-          <ReferenceLine y={0} stroke="#999" strokeDasharray="3 3" />
+          <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
           <Bar dataKey="roi" radius={[3, 3, 0, 0]}>
             {chartData.map((r, i) => (
-              <Cell key={i} fill={r.roi >= 0 ? "#16a34a" : "#dc2626"} />
+              <Cell key={i} fill={r.roi >= 0 ? "#10b981" : "#f43f5e"} />
             ))}
-            <ErrorBar dataKey="ci_error" width={6} strokeWidth={1.5} stroke="#6b7280" />
+            <ErrorBar dataKey="ci_error" width={6} strokeWidth={1.5} stroke="#94a3b8" />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -1022,7 +1042,7 @@ function SortableTable({ rows, columns }: { rows: SortRow[]; columns: SortCol[] 
           else { setSortKey(col.key); setAsc(false); }
         }}
         className={`px-3 py-2 text-[11px] uppercase tracking-wide font-semibold text-left cursor-pointer select-none whitespace-nowrap ${
-          active ? "text-blue-600" : "text-gray-500"
+          active ? "text-emerald-400" : "text-slate-500"
         }`}
       >
         {col.label} {active ? (asc ? "▲" : "▼") : ""}
@@ -1032,15 +1052,19 @@ function SortableTable({ rows, columns }: { rows: SortRow[]; columns: SortCol[] 
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="border-b border-gray-200">
+      <table className="data-table text-sm">
+        <thead className="border-b border-slate-700/80">
           <tr>{columns.map(header)}</tr>
         </thead>
         <tbody>
           {sorted.map((r, i) => (
-            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+            <tr key={i} className="border-b border-slate-800 transition-colors hover:bg-slate-800/40">
               {columns.map((col) => (
-                <td key={col.key} className="px-3 py-2 whitespace-nowrap text-gray-700">
+                <td
+                  key={col.key}
+                  data-label={col.label}
+                  className="whitespace-nowrap px-3 py-2 text-slate-300"
+                >
                   {col.render ? col.render(r) : String(r[col.key] ?? "–")}
                 </td>
               ))}

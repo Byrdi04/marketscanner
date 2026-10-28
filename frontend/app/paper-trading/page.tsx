@@ -211,8 +211,9 @@ export default function PaperTrading() {
     return val !== "All" && val !== "";
   }).length;
 
-  const inputClass = "border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400";
-  const selectClass = "border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 cursor-pointer";
+  const inputClass =
+    "rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder-slate-500 outline-none transition focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 [color-scheme:dark]";
+  const selectClass = inputClass + " cursor-pointer";
 
   const renderClv = (bet: PaperBet) => {
     if (!bet.closing_odds) return "-";
@@ -220,55 +221,65 @@ export default function PaperTrading() {
     const isGood = clvPercent > 0;
     return (
       <div>
-        <span className="text-gray-500">{bet.closing_odds.toFixed(2)}</span>
-        <div className={`text-[10px] font-bold ${isGood ? "text-green-600" : "text-red-500"}`}>
-          {isGood ? "Beat Line" : "Missed"} ({clvPercent > 0 ? "+" : ""}{clvPercent.toFixed(1)}%)
+        <span className="text-slate-500">{bet.closing_odds.toFixed(2)}</span>
+        <div className={`text-[10px] font-bold ${isGood ? "text-emerald-400" : "text-rose-400"}`}>
+          {isGood ? "Beat Line" : "Missed"} ({clvPercent > 0 ? "+" : ""}
+          {clvPercent.toFixed(1)}%)
         </div>
       </div>
     );
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
-      <div className="max-w-7xl mx-auto">
+    <main className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 lg:py-8">
 
         {/* HEADER */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Paper Trading</h1>
-            <p className="text-sm text-gray-500 mt-1">Automated simulation of every edge found</p>
-            <div className="flex gap-4 mt-4 text-sm font-medium">
-              <Link href="/" className="text-gray-500 hover:text-black hover:underline">← Scanner</Link>
-              <Link href="/portfolio" className="text-gray-500 hover:text-black hover:underline">Real Portfolio</Link>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
+              Paper Trading
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Automated simulation of every edge found
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3 text-sm font-medium">
+              <Link href="/" className="text-slate-400 hover:text-slate-100 hover:underline">
+                ← Scanner
+              </Link>
+              <Link href="/portfolio" className="text-slate-400 hover:text-slate-100 hover:underline">
+                Real Portfolio
+              </Link>
             </div>
           </div>
 
-          <div className="flex gap-4 items-center">
-            <div className="bg-white px-4 py-2 rounded shadow-sm border border-gray-200 text-right">
-              <div className="text-xs text-gray-400 uppercase font-bold">Simulated Profit</div>
-              <div className={`text-xl font-mono font-bold ${unitsProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
-                {unitsProfit > 0 ? "+" : ""}{unitsProfit.toFixed(2)} u
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="card px-4 py-2.5 text-right">
+              <div className="label-sm">Simulated Profit</div>
+              <div
+                className={`font-mono text-xl font-bold ${
+                  unitsProfit >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {unitsProfit > 0 ? "+" : ""}
+                {unitsProfit.toFixed(2)} u
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-slate-500">
                 ROI: {roi.toFixed(1)}% | WR: {winRate.toFixed(1)}%
               </div>
             </div>
 
-            <button
-              onClick={handleForceSettle}
-              disabled={loading}
-              className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300 disabled:opacity-50 text-sm font-bold"
-            >
-              {loading ? "Syncing..." : "Force Sync Results"}
+            <button onClick={handleForceSettle} disabled={loading} className="btn btn-ghost">
+              {loading ? "Syncing…" : "Force Sync Results"}
             </button>
           </div>
         </div>
 
         {/* FILTER BAR */}
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 mb-4">
+        <div className="card mb-4 p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Market</label>
+              <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Market</label>
               <select
                 className={selectClass}
                 value={filters.marketType}
@@ -280,7 +291,7 @@ export default function PaperTrading() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Status</label>
+              <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Status</label>
               <select
                 className={selectClass}
                 value={filters.status}
@@ -292,7 +303,7 @@ export default function PaperTrading() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Min EV</label>
+              <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Min EV</label>
               <input
                 type="number"
                 step="0.1"
@@ -304,7 +315,7 @@ export default function PaperTrading() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Max EV</label>
+              <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Max EV</label>
               <input
                 type="number"
                 step="0.1"
@@ -316,7 +327,7 @@ export default function PaperTrading() {
             </div>
 
             <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
-              <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Search</label>
+              <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Search</label>
               <input
                 type="text"
                 placeholder="Match or selection..."
@@ -330,14 +341,14 @@ export default function PaperTrading() {
               onClick={() => setShowMore(!showMore)}
               className={`text-xs font-bold px-3 py-1.5 rounded border transition cursor-pointer ${
                 showMore || filterCount > 0
-                  ? "bg-blue-50 border-blue-300 text-blue-700"
-                  : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                  : "bg-slate-800/40 border-slate-700 text-slate-500 hover:bg-slate-800/70"
               }`}
               title={showMore ? "Hide extra filters" : "Show extra filters"}
             >
               {showMore ? "− Less" : "+ More"}
               {filterCount > 0 && (
-                <span className="ml-1 bg-blue-200 text-blue-800 text-[9px] rounded-full px-1.5 py-0.5">
+                <span className="ml-1 bg-emerald-500/20 text-emerald-200 text-[9px] rounded-full px-1.5 py-0.5">
                   {filterCount}
                 </span>
               )}
@@ -346,7 +357,7 @@ export default function PaperTrading() {
             {filterCount > 0 && (
               <button
                 onClick={resetFilters}
-                className="text-xs text-gray-400 hover:text-red-500 underline cursor-pointer"
+                className="text-xs text-slate-500 hover:text-rose-400 underline cursor-pointer"
               >
                 Clear
               </button>
@@ -354,9 +365,9 @@ export default function PaperTrading() {
           </div>
 
           {showMore && (
-            <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-100">
+            <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-slate-800">
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">League</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">League</label>
                 <select
                   className={selectClass}
                   value={filters.league}
@@ -368,7 +379,7 @@ export default function PaperTrading() {
               </div>
 
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">From</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">From</label>
                 <input
                   type="date"
                   className={inputClass}
@@ -378,7 +389,7 @@ export default function PaperTrading() {
               </div>
 
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">To</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">To</label>
                 <input
                   type="date"
                   className={inputClass}
@@ -388,7 +399,7 @@ export default function PaperTrading() {
               </div>
 
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Min Odds</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Min Odds</label>
                 <input
                   type="number"
                   step="0.01"
@@ -400,7 +411,7 @@ export default function PaperTrading() {
               </div>
 
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Max Odds</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Max Odds</label>
                 <input
                   type="number"
                   step="0.01"
@@ -413,7 +424,7 @@ export default function PaperTrading() {
 
               {/* Hours to Game Start */}
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">Game In (h)</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">Game In (h)</label>
                 <input
                   type="number"
                   step="0.5"
@@ -422,7 +433,7 @@ export default function PaperTrading() {
                   value={filters.minHoursToStart}
                   onChange={e => setFilter("minHoursToStart", e.target.value)}
                 />
-                <span className="text-[10px] text-gray-300">–</span>
+                <span className="text-[10px] text-slate-600">–</span>
                 <input
                   type="number"
                   step="0.5"
@@ -435,7 +446,7 @@ export default function PaperTrading() {
 
               {/* CLV Range */}
               <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-gray-400 uppercase font-bold whitespace-nowrap">CLV %</label>
+                <label className="text-[10px] text-slate-500 uppercase font-bold whitespace-nowrap">CLV %</label>
                 <input
                   type="number"
                   step="0.1"
@@ -444,7 +455,7 @@ export default function PaperTrading() {
                   value={filters.minClv}
                   onChange={e => setFilter("minClv", e.target.value)}
                 />
-                <span className="text-[10px] text-gray-300">–</span>
+                <span className="text-[10px] text-slate-600">–</span>
                 <input
                   type="number"
                   step="0.1"
@@ -459,37 +470,41 @@ export default function PaperTrading() {
         </div>
 
         {/* TABLE */}
-        <div className="bg-white shadow rounded-lg overflow-hidden border border-gray-200">
-          <div className="px-6 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
-            Showing {filteredBets.length} of {safeBets.length} bets
+        <div className="card overflow-hidden">
+          <div className="border-b border-slate-800 bg-slate-900/60 px-5 py-2 text-xs text-slate-500">
+            Showing <span className="font-medium text-slate-300">{filteredBets.length}</span> of{" "}
+            {safeBets.length} bets
             {filteredBets.length !== safeBets.length && (
               <span className="ml-2">
                 — {filteredSettled.length} settled,{" "}
-                {unitsProfit >= 0 ? "+" : ""}{unitsProfit.toFixed(2)}u profit,{" "}
-                {roi.toFixed(1)}% ROI, {winRate.toFixed(1)}% WR
+                <span className={unitsProfit >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                  {unitsProfit >= 0 ? "+" : ""}
+                  {unitsProfit.toFixed(2)}u profit
+                </span>
+                , {roi.toFixed(1)}% ROI, {winRate.toFixed(1)}% WR
               </span>
             )}
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-100 text-gray-600 font-semibold border-b">
+            <table className="data-table text-sm">
+              <thead className="border-b border-slate-700/80 bg-slate-900/80 font-semibold text-slate-400">
                 <tr>
-                  <th className="px-6 py-3">Found At</th>
-                  <th className="px-6 py-3">Match</th>
-                  <th className="px-6 py-3">Selection</th>
-                  <th className="px-6 py-3 text-right">Danske (Soft)</th>
-                  <th className="px-6 py-3 text-right">Pinnacle (Fair)</th>
-                  <th className="px-6 py-3 text-right">CLV (Approx)</th>
-                  <th className="px-6 py-3 text-right">Est. Edge</th>
-                  <th className="px-6 py-3">Score</th>
-                  <th className="px-6 py-3 text-right">Result</th>
+                  <th className="px-5 py-3">Found At</th>
+                  <th className="px-5 py-3">Match</th>
+                  <th className="px-5 py-3">Selection</th>
+                  <th className="px-5 py-3 text-right">Danske (Soft)</th>
+                  <th className="px-5 py-3 text-right">Pinnacle (Fair)</th>
+                  <th className="px-5 py-3 text-right">CLV (Approx)</th>
+                  <th className="px-5 py-3 text-right">Est. Edge</th>
+                  <th className="px-5 py-3">Score</th>
+                  <th className="px-5 py-3 text-right">Result</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-800">
                 {filteredBets.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-gray-400">
+                    <td colSpan={9} className="px-5 py-12 text-center text-slate-500">
                       {safeBets.length === 0
                         ? "No paper bets logged yet. Wait for the scanner to run."
                         : "No bets match your filters."}
@@ -498,46 +513,63 @@ export default function PaperTrading() {
                 )}
 
                 {filteredBets.map((bet) => (
-                  <tr key={bet.id} className="hover:bg-blue-50 transition">
-                    <td className="px-6 py-4 text-gray-400 text-xs">
+                  <tr key={bet.id} className="transition-colors hover:bg-slate-800/40">
+                    <td data-label="Found" className="px-5 py-4 text-xs text-slate-500">
                       {new Date(bet.timestamp).toLocaleString(undefined, {
-                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
                       })}
                     </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
+                    <td data-label="Match" className="px-5 py-4 font-medium text-slate-100">
                       {bet.match_name}
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Selection" className="px-5 py-4">
                       {bet.selection}
-                      {bet.handicap && <span className="text-gray-400 text-xs ml-1">({bet.handicap})</span>}
-                      <div className="text-xs text-gray-400 mt-0.5">{bet.market_type}</div>
+                      {bet.handicap && (
+                        <span className="ml-1 text-xs text-slate-500">({bet.handicap})</span>
+                      )}
+                      <div className="mt-0.5 text-xs text-slate-500">{bet.market_type}</div>
                     </td>
-                    <td className="px-6 py-4 text-right font-mono font-bold text-gray-800">
+                    <td
+                      data-label="Danske"
+                      className="px-5 py-4 text-right font-mono font-bold text-slate-100"
+                    >
                       {bet.danske_odds.toFixed(2)}
                     </td>
-                    <td className="px-6 py-4 text-right font-mono text-gray-500">
+                    <td data-label="Pinnacle" className="px-5 py-4 text-right font-mono text-slate-500">
                       {bet.pinnacle_odds ? bet.pinnacle_odds.toFixed(2) : "-"}
                     </td>
-                    <td className="px-6 py-4 text-right font-mono text-gray-500">
+                    <td data-label="CLV" className="px-5 py-4 text-right font-mono text-slate-400">
                       {renderClv(bet)}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                        bet.ev_percent > 5 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-                      }`}>
+                    <td data-label="Est. Edge" className="px-5 py-4 text-right">
+                      <span
+                        className={`inline-block rounded px-2 py-0.5 text-xs font-bold ${
+                          bet.ev_percent > 5
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-800 text-slate-300"
+                        }`}
+                      >
                         {bet.ev_percent.toFixed(1)}%
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-xs text-gray-500">
+                    <td data-label="Score" className="px-5 py-4 text-xs text-slate-500">
                       {bet.result_score || "-"}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${
-                        bet.status === "Won" ? "bg-green-100 text-green-700" :
-                        bet.status === "Lost" ? "bg-red-50 text-red-700 opacity-50" :
-                        bet.status === "Void" ? "bg-yellow-50 text-yellow-700" :
-                        "text-gray-400 italic"
-                      }`}>
+                    <td data-label="Result" className="px-5 py-4 text-right">
+                      <span
+                        className={`inline-block rounded px-2 py-1 text-xs font-bold ${
+                          bet.status === "Won"
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : bet.status === "Lost"
+                              ? "bg-rose-500/10 text-rose-300 opacity-70"
+                              : bet.status === "Void"
+                                ? "bg-amber-500/10 text-amber-300"
+                                : "italic text-slate-500"
+                        }`}
+                      >
                         {bet.status === "Pending" ? "..." : bet.status}
                       </span>
                     </td>

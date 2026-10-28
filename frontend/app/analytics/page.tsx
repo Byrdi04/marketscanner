@@ -49,10 +49,14 @@ export default function Analytics() {
     if (active && payload && payload.length) {
       const point = payload[0].payload;
       return (
-        <div className="bg-white p-3 border border-gray-200 shadow-lg rounded text-sm">
-          <p className="font-bold mb-1">{point.date}</p>
-          <p className="text-gray-600 text-xs mb-2">{point.match}</p>
-          <p className={`font-mono font-bold ${point.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+        <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm shadow-xl shadow-black/40">
+          <p className="mb-1 font-bold text-slate-100">{point.date}</p>
+          <p className="mb-2 text-xs text-slate-400">{point.match}</p>
+          <p
+            className={`font-mono font-bold ${
+              point.profit >= 0 ? "text-emerald-400" : "text-rose-400"
+            }`}
+          >
             Total PnL: {formatDKK(point.profit)}
           </p>
         </div>
@@ -62,72 +66,78 @@ export default function Analytics() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 font-sans text-gray-900">
-      <div className="max-w-6xl mx-auto">
-        
+    <main className="min-h-screen bg-slate-950 font-sans text-slate-100">
+      <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 lg:py-8">
         {/* HEADER */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Performance Analytics</h1>
-          <div className="flex gap-4 mt-2 text-sm">
-            <Link href="/" className="text-blue-600 hover:underline">← Back to Scanner</Link>
-            <span className="text-gray-400">|</span>
-            <Link href="/portfolio" className="text-blue-600 hover:underline">View Portfolio</Link>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
+            Performance Analytics
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <Link
+              href="/"
+              className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              ← Back to Scanner
+            </Link>
+            <span className="text-slate-600">•</span>
+            <Link href="/portfolio" className="font-medium text-emerald-400 hover:text-emerald-300 hover:underline">
+              View Portfolio
+            </Link>
           </div>
         </div>
 
         {!data?.stats ? (
-          <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-6 text-amber-300">
             No settled bets found. Go settle some bets in your Portfolio to see stats!
           </div>
         ) : (
           <>
             {/* STAT CARDS */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-              
+            <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-5">
               <StatCard label="Total Bets" value={data.stats.total_bets} />
-              
-              <StatCard 
-                label="Total Profit" 
-                value={formatDKK(data.stats.total_profit)} 
-                color={data.stats.total_profit >= 0 ? "text-green-600" : "text-red-600"} 
+
+              <StatCard
+                label="Total Profit"
+                value={formatDKK(data.stats.total_profit)}
+                color={data.stats.total_profit >= 0 ? "text-emerald-400" : "text-rose-400"}
               />
-              
-              <StatCard 
-                label="ROI" 
-                value={`${data.stats.roi}%`} 
-                color={data.stats.roi >= 0 ? "text-green-600" : "text-red-600"} 
+
+              <StatCard
+                label="ROI"
+                value={`${data.stats.roi}%`}
+                color={data.stats.roi >= 0 ? "text-emerald-400" : "text-rose-400"}
               />
-              
-              <StatCard 
-                label="Win Rate" 
-                value={`${data.stats.win_rate}%`} 
-              />
-              
-              <StatCard 
-                label="Avg CLV" 
-                value={`${data.stats.avg_clv > 0 ? "+" : ""}${data.stats.avg_clv}%`} 
-                color={data.stats.avg_clv > 0 ? "text-green-600" : "text-yellow-600"}
+
+              <StatCard label="Win Rate" value={`${data.stats.win_rate}%`} />
+
+              <StatCard
+                label="Avg CLV"
+                value={`${data.stats.avg_clv > 0 ? "+" : ""}${data.stats.avg_clv}%`}
+                color={data.stats.avg_clv > 0 ? "text-emerald-400" : "text-amber-400"}
                 subtext="Beat Closing Line?"
               />
             </div>
 
             {/* CHART SECTION */}
-            <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 h-[500px]">
-              <h3 className="text-lg font-bold mb-6 text-gray-700">Cumulative Profit/Loss</h3>
-              
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="card h-[420px] p-5 sm:p-6">
+              <h3 className="mb-6 text-lg font-bold text-slate-100">
+                Cumulative Profit/Loss
+              </h3>
+
+              <ResponsiveContainer width="100%" height="85%">
                 <LineChart data={data.chart_data}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
                   <XAxis dataKey="date" hide />
-                  <YAxis />
+                  <YAxis tick={{ fill: "#64748b", fontSize: 12 }} />
                   <Tooltip content={<CustomTooltip />} />
-                  <ReferenceLine y={0} stroke="#999" strokeDasharray="3 3" />
-                  <Line 
-                    type="monotone" 
-                    dataKey="profit" 
-                    stroke="#000" 
-                    strokeWidth={2} 
-                    dot={{ r: 3, fill: '#000' }} 
+                  <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
+                  <Line
+                    type="monotone"
+                    dataKey="profit"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: "#10b981" }}
                     activeDot={{ r: 6 }}
                   />
                 </LineChart>
@@ -141,12 +151,12 @@ export default function Analytics() {
 }
 
 // Simple Sub-component for Cards
-function StatCard({ label, value, color = "text-gray-900", subtext }: any) {
+function StatCard({ label, value, color = "text-slate-100", subtext }: any) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-      <p className="text-xs text-gray-500 uppercase font-semibold">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-      {subtext && <p className="text-[10px] text-gray-400 mt-1">{subtext}</p>}
+    <div className="card px-4 py-4">
+      <p className="label-sm">{label}</p>
+      <p className={`mt-1 text-xl font-bold sm:text-2xl ${color}`}>{value}</p>
+      {subtext && <p className="mt-1 text-[10px] text-slate-500">{subtext}</p>}
     </div>
   );
 }
