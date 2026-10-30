@@ -49,7 +49,8 @@ export default function Home() {
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
   const [bankroll, setBankroll] = useState(1000);
   const [minEv, setMinEv] = useState(3.5); // Default: Only show > 2% EV
-  const [hidePlaced, setHidePlaced] = useState(false); // Toggle to hide placed bets
+  const [hidePlaced, setHidePlaced] = useState(true); // Toggle to hide placed bets (on by default)
+  const [hideExposed, setHideExposed] = useState(true); // Toggle to hide bets on matches we already have exposure to (on by default)
   const [rules, setRules] = useState<StrategyRule[]>([]);
   const [selectedRuleNumbers, setSelectedRuleNumbers] = useState<Set<number>>(new Set());
 
@@ -196,6 +197,8 @@ export default function Home() {
     }
     // B. Hide Placed Filter (always AND)
     if (hidePlaced && isBetPlaced(bet)) return false;
+    // C. Hide Exposure Filter (always AND) — hide bets on matches we already have a bet on
+    if (hideExposed && !isBetPlaced(bet) && hasMatchExposure(bet)) return false;
     return true;
   });
 
@@ -295,6 +298,18 @@ export default function Home() {
               className="h-4 w-4 rounded accent-emerald-500"
             />
             <span className="text-sm text-slate-300">Hide Already Placed</span>
+          </label>
+
+          {/* Toggle Hide Exposure */}
+          <label className="flex cursor-pointer select-none items-center gap-2">
+            <input
+              type="checkbox"
+              id="hideExposed"
+              checked={hideExposed}
+              onChange={(e) => setHideExposed(e.target.checked)}
+              className="h-4 w-4 rounded accent-emerald-500"
+            />
+            <span className="text-sm text-slate-300">Hide Exposed</span>
           </label>
 
           {/* Saved Rule Filter */}
