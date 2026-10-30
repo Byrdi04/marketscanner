@@ -36,6 +36,12 @@ interface ApiResponse {
   data: Opportunity[];
 }
 
+interface BankrollState {
+  configured: boolean;
+  config: { default_kelly_fraction: number } | null;
+  summary: { current_bankroll: number; available_bankroll: number } | null;
+}
+
 export default function Home() {
   // DATA STATE
   const [scannerData, setScannerData] = useState<Opportunity[]>([]);
@@ -47,7 +53,11 @@ export default function Home() {
   
   // UI STATE
   const [selectedBet, setSelectedBet] = useState<Opportunity | null>(null);
-  const [bankroll, setBankroll] = useState(1000);
+  const [bankroll, setBankroll] = useState<BankrollState>({
+    configured: false,
+    config: null,
+    summary: null,
+  });
   const [minEv, setMinEv] = useState(3.5); // Default: Only show > 2% EV
   const [hidePlaced, setHidePlaced] = useState(true); // Toggle to hide placed bets (on by default)
   const [hideExposed, setHideExposed] = useState(true); // Toggle to hide bets on matches we already have exposure to (on by default)
@@ -85,10 +95,21 @@ export default function Home() {
     }
   };
 
+  // 2a. FETCH BANKROLL (drives Kelly staking)
+  const fetchBankroll = async () => {
+    try {
+      const res = await fetch(`/api/bankroll`);
+      if (res.ok) setBankroll(await res.json());
+    } catch (err) {
+      console.error("Error fetching bankroll");
+    }
+  };
+
   // Load both on startup
   useEffect(() => {
     fetchScanner(false); // <--- FALSE: Load stale data if available
     fetchPlacedBets();
+    fetchBankroll();
   }, []);
 
   // 2b. FETCH SAVED NOTIFICATION RULES (rule-based filtering)
@@ -152,8 +173,9 @@ export default function Home() {
 
       if (res.ok) {
         setSelectedBet(null);
-        // Refresh placed bets so the UI updates instantly
-        fetchPlacedBets(); 
+        // Refresh placed bets + bankroll so the UI updates instantly
+        fetchPlacedBets();
+        fetchBankroll();
         alert("Bet placed!");
       }
     } catch (err) {
@@ -261,6 +283,40 @@ export default function Home() {
                 <span>Pinnacle Data:</span>
                 <span className={`inline-block h-2 w-2 rounded-full ${getStalenessInfo().color}`} />
                 <span className="font-medium text-slate-300">{getStalenessInfo().text}</span>
+              </span>
+
+              {/* BANKROLL CHIP */}
+              <span
+                className={`mt-1 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono ${
+                  bankroll.configured
+                    ? "border-slate-700/80 bg-slate-800/60 text-slate-300"
+                    : "border-amber-500/30 bg-amber-500/10"
+                }`}
+              >
+                <span className="font-sans text-[10px] uppercase tracking-wider text-slate-500">
+                  Bankroll
+                </span>
+                {bankroll.configured && bankroll.summary ? (
+                  <>
+                    <span className="font-bold text-slate-100">
+                      kr {bankroll.summary.available_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                    </span>
+                    <span className="text-slate-500">avail</span>
+                    <span className="text-slate-400">
+                      / {bankroll.summary.current_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                    </span>
+                    <Link href="/settings" className="font-sans font-medium text-emerald-400 hover:underline">
+                      Edit
+                    </Link>
+                  </>
+                ) : (
+                  <Link
+                    href="/settings"
+                    className="font-sans font-medium text-amber-300 hover:text-amber-200 hover:underline"
+                  >
+                    not set — configure
+                  </Link>
+                )}
               </span>
             </div>
           </div>
@@ -458,7 +514,9 @@ export default function Home() {
         isOpen={!!selectedBet}
         onClose={() => setSelectedBet(null)}
         onConfirm={handleConfirmBet}
-        currentBankroll={bankroll}
+        currentBankroll={bankroll.configured && bankroll.summary ? bankroll.summary.available_bankroll : 0}
+        defaultKellyFraction={bankroll.config?.default_kelly_fraction ?? 0.5}
+        bankrollConfigured={bankroll.configured}
       />
     </main>
   );

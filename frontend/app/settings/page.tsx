@@ -19,7 +19,44 @@ interface NotificationLogEntry {
   notified_at: string;
 }
 
+interface BankrollTx {
+  id: number;
+  tx_type: "deposit" | "withdrawal";
+  amount: number;
+  tx_date: string;
+  note: string | null;
+}
+
+interface BankrollSummary {
+  current_bankroll: number;
+  available_bankroll: number;
+  total_deposits: number;
+  total_withdrawals: number;
+  net_deposits: number;
+  total_pnl: number;
+  pending_stakes: number;
+  account_roi: number | null;
+}
+
+interface BankrollData {
+  configured: boolean;
+  config: {
+    starting_balance: number;
+    as_of_date: string;
+    default_kelly_fraction: number;
+  } | null;
+  summary: BankrollSummary | null;
+  transactions: BankrollTx[];
+}
+
 const ALL_MARKET_TYPES = ["Spread", "Total", "MoneyLine"];
+
+function todayStr() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
 const TIME_OPTIONS = [
@@ -48,9 +85,30 @@ export default function Settings() {
   // Log
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
 
+  // Bankroll & Staking
+  const [bankrollData, setBankrollData] = useState<BankrollData>({
+    configured: false,
+    config: null,
+    summary: null,
+    transactions: [],
+  });
+  const [bankrollForm, setBankrollForm] = useState({
+    starting_balance: "",
+    as_of_date: todayStr(),
+    default_kelly_fraction: 0.5,
+  });
+  const [txForm, setTxForm] = useState({
+    tx_type: "deposit" as "deposit" | "withdrawal",
+    amount: "",
+    tx_date: todayStr(),
+    note: "",
+  });
+  const [bankrollError, setBankrollError] = useState<string | null>(null);
+
   // UI state
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [testStatus, setTestStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [bankrollSaveStatus, setBankrollSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // ---- FETCH ----
 
@@ -78,6 +136,20 @@ export default function Settings() {
           .map((r: any) => normalizeRule(r))
           .filter(Boolean) as StrategyRule[];
         if (parsed.length) setRules(parsed);
+      }
+
+      // Fetch bankroll & staking
+      const bankrollRes = await fetch("/api/bankroll");
+      if (bankrollRes.ok) {
+        const bk: BankrollData = await bankrollRes.json();
+        setBankrollData(bk);
+        if (bk.config) {
+          setBankrollForm({
+            starting_balance: String(bk.config.starting_balance),
+            as_of_date: bk.config.as_of_date,
+            default_kelly_fraction: bk.config.default_kelly_fraction,
+          });
+        }
       }
     } catch (err) {
       console.error("Failed to fetch settings", err);
@@ -132,6 +204,80 @@ export default function Settings() {
       }
     } catch (err) {
       setTestStatus("error");
+    }
+  };
+
+  // ---- BANKROLL & STAKING ----
+
+  const handleSaveBankroll = async () => {
+    const amount = parseFloat(bankrollForm.starting_balance);
+    if (isNaN(amount) || amount < 0 || !bankrollForm.as_of_date) {
+      setBankrollError("Enter a valid starting balance and as-of date.");
+      return;
+    }
+    setBankrollSaveStatus("saving");
+    setBankrollError(null);
+    try {
+      const res = await fetch("/api/bankroll", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          starting_balance: amount,
+          as_of_date: bankrollForm.as_of_date,
+          default_kelly_fraction: bankrollForm.default_kelly_fraction,
+        }),
+      });
+      if (res.ok) {
+        setBankrollData(await res.json());
+        setBankrollSaveStatus("saved");
+        setTimeout(() => setBankrollSaveStatus("idle"), 3000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setBankrollError(err.detail || "Failed to save bankroll");
+        setBankrollSaveStatus("error");
+      }
+    } catch {
+      setBankrollSaveStatus("error");
+    }
+  };
+
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBankrollError(null);
+    const amount = parseFloat(txForm.amount);
+    if (isNaN(amount) || amount <= 0 || !txForm.tx_date) {
+      setBankrollError("Enter an amount greater than 0 and a date.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/bankroll/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tx_type: txForm.tx_type,
+          amount,
+          tx_date: txForm.tx_date,
+          note: txForm.note.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        setBankrollData(await res.json());
+        setTxForm({ tx_type: "deposit", amount: "", tx_date: todayStr(), note: "" });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setBankrollError(err.detail || "Failed to add transaction");
+      }
+    } catch {
+      setBankrollError("Failed to add transaction");
+    }
+  };
+
+  const handleDeleteTransaction = async (id: number) => {
+    try {
+      const res = await fetch(`/api/bankroll/transactions/${id}`, { method: "DELETE" });
+      if (res.ok) setBankrollData(await res.json());
+    } catch {
+      // ignore — ledger refresh happens on next load
     }
   };
 
@@ -494,6 +640,278 @@ export default function Settings() {
               {testStatus === "error" && "Error - Try Again"}
               {testStatus === "idle" && "Send Test Notification"}
             </button>
+          </div>
+        </div>
+
+        {/* BANKROLL & STAKING CARD */}
+        <div className="card p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-1">Bankroll & Staking</h2>
+          <p className="text-sm text-slate-400 mb-6">
+            The bankroll is derived automatically: starting balance + deposits − withdrawals + PnL from settled
+            bets. Bets placed <strong>before the as-of date</strong> are treated as history and never touch these numbers.
+          </p>
+
+          <div className="space-y-6">
+            {/* STARTING BALANCE + AS-OF DATE */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  Starting Balance (kr)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={bankrollForm.starting_balance}
+                  onChange={(e) =>
+                    setBankrollForm((prev) => ({ ...prev, starting_balance: e.target.value }))
+                  }
+                  placeholder="e.g. 10000"
+                  className="input font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  As-Of Date
+                </label>
+                <input
+                  type="date"
+                  value={bankrollForm.as_of_date}
+                  onChange={(e) =>
+                    setBankrollForm((prev) => ({ ...prev, as_of_date: e.target.value }))
+                  }
+                  className="input"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Your balance on this date. Deposits/withdrawals dated earlier are rejected.
+                </p>
+              </div>
+            </div>
+
+            {/* DEFAULT KELLY FRACTION */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Default Kelly Fraction:{" "}
+                <span className="font-mono text-emerald-400">
+                  {(bankrollForm.default_kelly_fraction * 100).toFixed(0)}%
+                </span>
+              </label>
+              <input
+                type="range"
+                min="0.05"
+                max="1"
+                step="0.05"
+                value={bankrollForm.default_kelly_fraction}
+                onChange={(e) =>
+                  setBankrollForm((prev) => ({
+                    ...prev,
+                    default_kelly_fraction: parseFloat(e.target.value),
+                  }))
+                }
+                className="w-full cursor-pointer accent-emerald-500"
+              />
+              <div className="flex justify-between text-xs text-slate-500 mt-1">
+                <span>5%</span>
+                <span>100%</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Starting point for the Kelly slider in the bet modal — you can still adjust each bet.
+              </p>
+            </div>
+
+            {/* COMPUTED READOUT */}
+            {bankrollData.summary && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-700/70 bg-slate-800/50 p-4 sm:grid-cols-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-slate-500">Current</p>
+                  <p className="mt-0.5 font-mono text-lg font-bold text-slate-100">
+                    kr {bankrollData.summary.current_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-slate-500">Available</p>
+                  <p className="mt-0.5 font-mono text-lg font-bold text-slate-100">
+                    kr {bankrollData.summary.available_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-slate-500">Net PnL</p>
+                  <p
+                    className={`mt-0.5 font-mono text-lg font-bold ${
+                      bankrollData.summary.total_pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                    }`}
+                  >
+                    {bankrollData.summary.total_pnl >= 0 ? "+" : ""}
+                    {bankrollData.summary.total_pnl.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-slate-500">Account ROI</p>
+                  <p className="mt-0.5 font-mono text-lg font-bold text-slate-100">
+                    {bankrollData.summary.account_roi === null
+                      ? "—"
+                      : `${bankrollData.summary.account_roi.toLocaleString("da-DK", { maximumFractionDigits: 1 })}%`}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {bankrollData.summary && bankrollData.summary.pending_stakes > 0 && (
+              <p className="text-xs text-slate-500">
+                Pending stakes: kr{" "}
+                {bankrollData.summary.pending_stakes.toLocaleString("da-DK", { maximumFractionDigits: 0 })} — deducted
+                from Available until they settle.
+              </p>
+            )}
+
+            {/* SAVE */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSaveBankroll}
+                disabled={bankrollSaveStatus === "saving"}
+                className="btn btn-primary"
+              >
+                {bankrollSaveStatus === "saving" && "Saving..."}
+                {bankrollSaveStatus === "saved" && "Saved!"}
+                {bankrollSaveStatus === "error" && "Error - Try Again"}
+                {bankrollSaveStatus === "idle" && "Save Bankroll"}
+              </button>
+              {bankrollError && <span className="text-sm text-rose-400">{bankrollError}</span>}
+            </div>
+          </div>
+
+          {/* DEPOSITS & WITHDRAWALS LEDGER */}
+          <div className="mt-8">
+            <h3 className="text-sm font-semibold text-slate-200 mb-1">Deposits & Withdrawals</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Each row moves the bankroll and feeds Account ROI. Transactions dated before the as-of date are rejected.
+            </p>
+
+            {!bankrollData.configured ? (
+              <p className="text-sm text-slate-500">
+                Save a starting balance and as-of date first to enable the ledger.
+              </p>
+            ) : (
+              <>
+                {/* ADD FORM */}
+                <form onSubmit={handleAddTransaction} className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Type</label>
+                    <div className="flex overflow-hidden rounded-lg border border-slate-700">
+                      {(["deposit", "withdrawal"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setTxForm((prev) => ({ ...prev, tx_type: t }))}
+                          className={`flex-1 px-2 py-1.5 text-xs font-medium capitalize transition-colors ${
+                            txForm.tx_type === t
+                              ? t === "deposit"
+                                ? "bg-emerald-500 text-slate-950"
+                                : "bg-rose-500 text-slate-950"
+                              : "bg-slate-800/60 text-slate-300"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Amount (kr)</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      value={txForm.amount}
+                      onChange={(e) => setTxForm((prev) => ({ ...prev, amount: e.target.value }))}
+                      placeholder="500"
+                      className="input !py-1.5 !text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={txForm.tx_date}
+                      onChange={(e) => setTxForm((prev) => ({ ...prev, tx_date: e.target.value }))}
+                      className="input !py-1.5 !text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Note (optional)</label>
+                    <input
+                      type="text"
+                      value={txForm.note}
+                      onChange={(e) => setTxForm((prev) => ({ ...prev, note: e.target.value }))}
+                      placeholder="Top up"
+                      className="input !py-1.5 !text-sm"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button type="submit" className="btn btn-ghost w-full !py-1.5 !text-sm">
+                      Add
+                    </button>
+                  </div>
+                </form>
+
+                {/* LEDGER TABLE */}
+                {bankrollData.transactions.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">
+                    No deposits or withdrawals yet.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="data-table text-sm">
+                      <thead className="border-b border-slate-700/80 bg-slate-900/80 font-medium text-slate-400">
+                        <tr>
+                          <th className="px-4 py-2">Date</th>
+                          <th className="px-4 py-2">Type</th>
+                          <th className="px-4 py-2 text-right">Amount</th>
+                          <th className="px-4 py-2">Note</th>
+                          <th className="px-4 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {bankrollData.transactions.map((tx) => (
+                          <tr key={tx.id}>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-400">{tx.tx_date}</td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${
+                                  tx.tx_type === "deposit"
+                                    ? "bg-emerald-500/10 text-emerald-300"
+                                    : "bg-rose-500/10 text-rose-300"
+                                }`}
+                              >
+                                {tx.tx_type}
+                              </span>
+                            </td>
+                            <td
+                              className={`px-4 py-3 text-right font-mono ${
+                                tx.tx_type === "deposit" ? "text-emerald-300" : "text-rose-300"
+                              }`}
+                            >
+                              {tx.tx_type === "deposit" ? "+" : "−"}
+                              {tx.amount.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-400">{tx.note || "—"}</td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => handleDeleteTransaction(tx.id)}
+                                aria-label="Delete transaction"
+                                className="rounded p-1 text-slate-500 transition hover:bg-slate-800 hover:text-rose-400"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 

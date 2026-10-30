@@ -17,14 +17,36 @@ interface Bet {
   closing_odds: number | null;
 }
 
+interface BankrollSummary {
+  current_bankroll: number;
+  available_bankroll: number;
+  total_deposits: number;
+  total_withdrawals: number;
+  net_deposits: number;
+  total_pnl: number;
+  pending_stakes: number;
+  account_roi: number | null;
+}
+
+interface BankrollData {
+  configured: boolean;
+  summary: BankrollSummary | null;
+}
+
 export default function Portfolio() {
   const [bets, setBets] = useState<Bet[]>([]);
+  const [bankroll, setBankroll] = useState<BankrollData>({ configured: false, summary: null });
   const [loading, setLoading] = useState(false);
 
   const fetchBets = async () => {
     const res = await fetch(`/api/my-bets`);
     const json = await res.json();
     setBets(json.data);
+  };
+
+  const fetchBankroll = async () => {
+    const res = await fetch(`/api/bankroll`);
+    if (res.ok) setBankroll(await res.json());
   };
 
   const handleSettle = async () => {
@@ -34,6 +56,7 @@ export default function Portfolio() {
       const data = await res.json();
       alert(data.message);
       fetchBets(); // Refresh list
+      fetchBankroll(); // Derived bankroll may have changed after settling
     } catch (err) {
       alert("Failed to settle bets");
     } finally {
@@ -43,6 +66,7 @@ export default function Portfolio() {
 
   useEffect(() => {
     fetchBets();
+    fetchBankroll();
   }, []);
 
   // Calculate Stats
@@ -85,7 +109,7 @@ export default function Portfolio() {
                     profit >= 0 ? "text-emerald-400" : "text-rose-400"
                   }`}
                 >
-                  {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
+                  {profit >= 0 ? "+" : ""}kr {profit.toFixed(2)}
                 </span>
               </span>
             </div>
@@ -105,13 +129,13 @@ export default function Portfolio() {
           <div className="card px-4 py-3">
             <p className="label-sm">Total Staked</p>
             <p className="mt-1 font-mono text-xl font-bold text-slate-100">
-              ${totalStaked.toFixed(0)}
+              kr {totalStaked.toFixed(0)}
             </p>
           </div>
           <div className="card px-4 py-3">
             <p className="label-sm">Gross Return</p>
             <p className="mt-1 font-mono text-xl font-bold text-slate-100">
-              ${totalReturn.toFixed(0)}
+              kr {totalReturn.toFixed(0)}
             </p>
           </div>
           <div className="card px-4 py-3">
@@ -121,9 +145,81 @@ export default function Portfolio() {
                 profit >= 0 ? "text-emerald-400" : "text-rose-400"
               }`}
             >
-              {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
+              {profit >= 0 ? "+" : ""}kr {profit.toFixed(2)}
             </p>
           </div>
+        </div>
+
+        {/* BANKROLL CARD */}
+        <div className="card p-6 mb-6">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">Bankroll</h2>
+              <p className="text-sm text-slate-400">
+                Derived from your starting balance, deposits/withdrawals and settled bets since the as-of date.
+              </p>
+            </div>
+            <Link href="/settings" className="shrink-0 text-sm font-medium text-emerald-400 hover:text-emerald-300 hover:underline">
+              Manage in Settings →
+            </Link>
+          </div>
+
+          {!bankroll.configured ? (
+            <p className="text-sm text-slate-500">
+              No bankroll configured yet —{" "}
+              <Link href="/settings" className="text-emerald-400 hover:underline">
+                set your starting balance in Settings
+              </Link>{" "}
+              to see bankroll stats and Kelly staking.
+            </p>
+          ) : bankroll.summary ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="rounded-lg border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                <p className="label-sm">Current</p>
+                <p className="mt-1 font-mono text-lg font-bold text-slate-100">
+                  kr {bankroll.summary.current_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                <p className="label-sm">Available</p>
+                <p className="mt-1 font-mono text-lg font-bold text-slate-100">
+                  kr {bankroll.summary.available_bankroll.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                <p className="label-sm">Net Deposits</p>
+                <p className="mt-1 font-mono text-lg font-bold text-slate-100">
+                  kr {bankroll.summary.net_deposits.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                <p className="label-sm">Total PnL</p>
+                <p
+                  className={`mt-1 font-mono text-lg font-bold ${
+                    bankroll.summary.total_pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                  }`}
+                >
+                  {bankroll.summary.total_pnl >= 0 ? "+" : ""}
+                  kr {bankroll.summary.total_pnl.toLocaleString("da-DK", { maximumFractionDigits: 0 })}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                <p className="label-sm">Account ROI</p>
+                <p className="mt-1 font-mono text-lg font-bold text-slate-100">
+                  {bankroll.summary.account_roi === null
+                    ? "—"
+                    : `${bankroll.summary.account_roi.toLocaleString("da-DK", { maximumFractionDigits: 1 })}%`}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {bankroll.summary && bankroll.summary.pending_stakes > 0 && (
+            <p className="mt-3 text-xs text-slate-500">
+              Pending stakes: kr {bankroll.summary.pending_stakes.toLocaleString("da-DK", { maximumFractionDigits: 0 })} —
+              subtracted from Available until those bets settle.
+            </p>
+          )}
         </div>
 
         {/* TABLE */}
@@ -181,7 +277,7 @@ export default function Portfolio() {
                         })()}
                     </td>
                     <td data-label="Stake" className="px-5 py-4 text-right font-mono text-slate-300">
-                      ${bet.stake}
+                      kr {bet.stake}
                     </td>
                     <td data-label="Result" className="px-5 py-4 text-xs text-slate-500">
                       {bet.result_score || "-"}

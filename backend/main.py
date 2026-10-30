@@ -882,6 +882,29 @@ def init_db():
         )
     ''')
 
+    # 5.75 BANKROLL CONFIG (single row, id=1)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bankroll_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            starting_balance REAL NOT NULL DEFAULT 0,
+            as_of_date TEXT NOT NULL,
+            default_kelly_fraction REAL NOT NULL DEFAULT 0.5,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 5.8 BANKROLL TRANSACTIONS (deposits / withdrawals ledger)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bankroll_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            tx_date TEXT NOT NULL,
+            note TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # 6. INDICES
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_match ON paper_bets(match_name)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_paper_bets_time ON paper_bets(timestamp)')
@@ -1611,6 +1634,216 @@ def post_notification_rules(rules: list[NotificationRule]):
         return {"message": "Rules saved successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------
+# BANKROLL & STAKING (derived bankroll, ledger, Kelly default)
+# ---------------------------------------------------------
+
+class BankrollConfig(BaseModel):
+    starting_balance: float
+    as_of_date: str
+    default_kelly_fraction: float = 0.5
+
+
+class BankrollTransaction(BaseModel):
+    tx_type: str  # 'deposit' | 'withdrawal'
+    amount: float
+    tx_date: str
+    note: Optional[str] = None
+
+
+def _is_valid_date(date_str):
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def load_bankroll_config():
+    """Returns the bankroll config row as a dict, or None if unconfigured."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM bankroll_config WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"Error loading bankroll config: {e}")
+        return None
+
+
+def save_bankroll_config(starting_balance, as_of_date, default_kelly_fraction):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO bankroll_config
+            (id, starting_balance, as_of_date, default_kelly_fraction, updated_at)
+        VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (starting_balance, as_of_date, default_kelly_fraction))
+    conn.commit()
+    conn.close()
+
+
+def load_bankroll_transactions():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM bankroll_transactions ORDER BY tx_date ASC, id ASC"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def _settled_bet_pnl(bet):
+    if bet["status"] == "Won":
+        return (bet["stake"] * bet["danske_odds"]) - bet["stake"]
+    if bet["status"] == "Lost":
+        return -bet["stake"]
+    return 0  # Void — stake returned
+
+
+def compute_bankroll_summary(config):
+    """
+    Derived bankroll & ROI, all gated by the as-of date:
+
+      current  = starting_balance + deposits - withdrawals
+                 + PnL(bets placed on/after as_of_date, settled)
+      available = current - pending stakes (placed on/after as_of_date)
+      account_roi = PnL / net_deposits  (None when net_deposits <= 0)
+
+    Bets placed BEFORE the as-of date are treated as history: they are
+    already reflected in the starting balance and never touch these numbers.
+    """
+    as_of = config["as_of_date"]
+
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Ledger — entry validation guarantees tx_date >= as_of_date
+    cursor.execute("SELECT * FROM bankroll_transactions")
+    txs = cursor.fetchall()
+    deposits = sum(t["amount"] for t in txs if t["tx_type"] == "deposit")
+    withdrawals = sum(t["amount"] for t in txs if t["tx_type"] == "withdrawal")
+
+    # Settled PnL — bets placed on/after the as-of date
+    cursor.execute(
+        "SELECT * FROM bets WHERE status IN ('Won', 'Lost', 'Void') AND date(timestamp) >= ?",
+        (as_of,)
+    )
+    settled = cursor.fetchall()
+    pnl = sum(_settled_bet_pnl(dict(b)) for b in settled)
+
+    # Pending stakes — bets placed on/after the as-of date
+    cursor.execute(
+        "SELECT COALESCE(SUM(stake), 0) AS total FROM bets WHERE status = 'Pending' AND date(timestamp) >= ?",
+        (as_of,)
+    )
+    pending = cursor.fetchone()["total"] or 0
+
+    conn.close()
+
+    current = config["starting_balance"] + deposits - withdrawals + pnl
+    available = current - pending
+    net_deposits = deposits - withdrawals
+    account_roi = (pnl / net_deposits * 100) if net_deposits > 0 else None
+
+    return {
+        "current_bankroll": round(current, 2),
+        "available_bankroll": round(available, 2),
+        "total_deposits": round(deposits, 2),
+        "total_withdrawals": round(withdrawals, 2),
+        "net_deposits": round(net_deposits, 2),
+        "total_pnl": round(pnl, 2),
+        "pending_stakes": round(pending, 2),
+        "account_roi": round(account_roi, 2) if account_roi is not None else None,
+    }
+
+
+def _bankroll_payload():
+    config = load_bankroll_config()
+    if config is None:
+        return {"configured": False, "config": None, "summary": None, "transactions": []}
+    return {
+        "configured": True,
+        "config": {
+            "starting_balance": config["starting_balance"],
+            "as_of_date": config["as_of_date"],
+            "default_kelly_fraction": config["default_kelly_fraction"],
+        },
+        "summary": compute_bankroll_summary(config),
+        "transactions": load_bankroll_transactions(),
+    }
+
+
+@app.get("/api/bankroll")
+def get_bankroll():
+    return _bankroll_payload()
+
+
+@app.put("/api/bankroll")
+def put_bankroll(config: BankrollConfig):
+    if config.starting_balance < 0:
+        raise HTTPException(status_code=400, detail="Starting balance cannot be negative")
+    if not _is_valid_date(config.as_of_date):
+        raise HTTPException(status_code=400, detail="As-of date must be YYYY-MM-DD")
+    if not (0.05 <= config.default_kelly_fraction <= 1.0):
+        raise HTTPException(status_code=400, detail="Default Kelly fraction must be between 0.05 and 1.0")
+
+    save_bankroll_config(
+        config.starting_balance,
+        config.as_of_date,
+        config.default_kelly_fraction,
+    )
+    return _bankroll_payload()
+
+
+@app.post("/api/bankroll/transactions")
+def add_bankroll_transaction(tx: BankrollTransaction):
+    config = load_bankroll_config()
+    if config is None:
+        raise HTTPException(status_code=400, detail="Set a starting balance and as-of date first")
+    if tx.tx_type not in ("deposit", "withdrawal"):
+        raise HTTPException(status_code=400, detail="tx_type must be 'deposit' or 'withdrawal'")
+    if tx.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+    if not _is_valid_date(tx.tx_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    if tx.tx_date < config["as_of_date"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transaction date must be on or after the as-of date ({config['as_of_date']})",
+        )
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO bankroll_transactions (tx_type, amount, tx_date, note) VALUES (?, ?, ?, ?)",
+        (tx.tx_type, tx.amount, tx.tx_date, tx.note),
+    )
+    conn.commit()
+    conn.close()
+    return _bankroll_payload()
+
+
+@app.delete("/api/bankroll/transactions/{tx_id}")
+def delete_bankroll_transaction(tx_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM bankroll_transactions WHERE id = ?", (tx_id,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return _bankroll_payload()
 
 
 @app.post("/api/test-notification")

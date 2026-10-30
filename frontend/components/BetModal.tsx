@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface BetModalProps {
   bet: any;
@@ -8,6 +8,8 @@ interface BetModalProps {
   onClose: () => void;
   onConfirm: (stake: number) => void;
   currentBankroll: number;
+  defaultKellyFraction?: number;
+  bankrollConfigured?: boolean;
 }
 
 // YOUR CUSTOM ROUNDING LOGIC (DKK)
@@ -19,10 +21,27 @@ const getSmartRoundedStake = (rawStake: number) => {
   return Math.round(rawStake / 50) * 50;
 };
 
-export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankroll }: BetModalProps) {
+export default function BetModal({
+  bet,
+  isOpen,
+  onClose,
+  onConfirm,
+  currentBankroll,
+  defaultKellyFraction = 0.5,
+  bankrollConfigured = true,
+}: BetModalProps) {
   const [stake, setStake] = useState<string>("");
-  const [fraction, setFraction] = useState<number>(0.5); 
+  const [fraction, setFraction] = useState<number>(defaultKellyFraction);
   const [copied, setCopied] = useState(false); // State for clipboard feedback
+  const prevOpen = useRef(false);
+
+  // Reset the Kelly fraction to the saved default each time the modal opens
+  useEffect(() => {
+    if (isOpen && !prevOpen.current) {
+      setFraction(defaultKellyFraction);
+    }
+    prevOpen.current = isOpen;
+  }, [isOpen, defaultKellyFraction]);
 
   // SAFE CALCULATIONS
   const b = bet ? bet.danske_odds - 1 : 0;
@@ -157,32 +176,47 @@ export default function BetModal({ bet, isOpen, onClose, onConfirm, currentBankr
             </span>
           </div>
 
-          <input
-            type="range"
-            min="0.1"
-            max="1"
-            step="0.1"
-            value={fraction}
-            onChange={(e) => setFraction(parseFloat(e.target.value))}
-            className="mb-4 w-full cursor-pointer accent-emerald-500"
-          />
+          {!bankrollConfigured ? (
+            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
+              <strong>⚠️ No bankroll configured</strong>
+              <p className="mt-1 text-xs">
+                Set your starting balance in{" "}
+                <a href="/settings" className="underline hover:text-amber-200">
+                  Settings
+                </a>{" "}
+                to use Kelly staking.
+              </p>
+            </div>
+          ) : (
+            <>
+              <input
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.1"
+                value={fraction}
+                onChange={(e) => setFraction(parseFloat(e.target.value))}
+                className="mb-4 w-full cursor-pointer accent-emerald-500"
+              />
 
-          <label className="mb-1 block text-sm font-medium text-slate-200">
-            Stake Amount (DKK)
-          </label>
-          <div className="relative">
-            <span className="absolute left-3 top-2.5 text-slate-500">kr</span>
-            <input
-              type="number"
-              value={stake}
-              onChange={(e) => setStake(e.target.value)}
-              className="input w-full pl-8 pr-4 font-mono"
-            />
-          </div>
-          <div className="mt-2 flex justify-between text-xs text-slate-500">
-            <p>Raw Kelly: {rawStake.toFixed(2)}</p>
-            <p className="font-medium text-slate-300">Rounded: {suggestedStake}</p>
-          </div>
+              <label className="mb-1 block text-sm font-medium text-slate-200">
+                Stake Amount (DKK)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-slate-500">kr</span>
+                <input
+                  type="number"
+                  value={stake}
+                  onChange={(e) => setStake(e.target.value)}
+                  className="input w-full pl-8 pr-4 font-mono"
+                />
+              </div>
+              <div className="mt-2 flex justify-between text-xs text-slate-500">
+                <p>Raw Kelly: {rawStake.toFixed(2)}</p>
+                <p className="font-medium text-slate-300">Rounded: {suggestedStake}</p>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ACTIONS */}
