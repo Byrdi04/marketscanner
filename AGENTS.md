@@ -1,56 +1,34 @@
-# DSH Agent Instructions
+# Market Scanner — Agent Instructions
 
-## Git Workflow
+## Operating model
+Personal, single-user project. **There is no dev or staging environment.** The production stack is defined by `docker-compose.yml` at the repo root and deployed from this host. A push to `dsh/dev` followed by a deploy *is* the release pipeline.
 
-### Branching
-- Always work on the `dsh/dev` branch unless told otherwise
-- Never commit directly to `main`
-- Check you are on the right branch before starting: `git checkout dsh/dev`
-- Use conventional commit message prefixes: `feat:`, `fix:`, `chore:`, `refactor:`
+## Workflow: change → production
+1. Work on `dsh/dev`. Never commit to `main`.
+2. Commit after each logical change with a conventional prefix (`feat:`, `fix:`, `chore:`, `refactor:`). Run `git status` first.
+3. Push: `git push origin dsh/dev`.
+4. Deploy from the repo root: `./deploy.sh`. It rebuilds both images, restarts the stack, and smoke-checks frontend + backend.
+5. Confirm the push landed and the stack is up: `git log --oneline origin/dsh/dev -n 3` and `docker compose ps`.
 
-### Committing
-- Commit after each logical change, not only at the end of the session
-- Always run `git status` before committing to confirm what you are staging
-- Never commit the `backend/data/` directory
-- Never commit `.env` files or secrets of any kind
+When finished, tell the user:
+"Changes deployed to production. Review at http://odds.lan (LAN) or https://odds.partitest.dk (public)."
 
-### Pushing
-- Push to GitHub after every commit: `git push origin dsh/dev`
-- If the branch does not exist on remote yet: `git push -u origin dsh/dev`
+## Production stack
+- `docker-compose.yml` at the repo root is the single source of truth; `deploy.sh` is the deploy procedure. Do not restate either in this file.
+- Backend container `market-scanner-backend` (FastAPI, port 8000); frontend container `market-scanner-frontend` (Next.js, port 3000).
+- Served through the npmplus reverse proxy on the shared `proxy-net` network. Persistent data lives **outside the repo** at `/opt/appdata/market-scanner/` (production SQLite `bets.db` + `.env`, mounted at container `/app/data`).
+- Dependency changes (`backend/requirements.txt`, `frontend/package.json`) take effect on the next `./deploy.sh` rebuild.
 
-### When finished
-- Confirm the final push succeeded: `git log --oneline origin/dsh/dev -n 3`
-- Tell the user: "Changes pushed to GitHub on branch `dsh/dev`.
-  The dev container will pick them up within 30 seconds.
-  Check http://market-scanner-dev.local to review."
+## Prod surface (the only allowed target of verification)
+Against production, only these are side-effect-free: `http://odds.lan/` (frontend reachable) and `GET http://odds.lan/api/health` (backend liveness). An agent may call those, and nothing else on production, unless the user signs off on the specific call first. In particular: action endpoints (`place-bet`, `settle-bets`, `force-scan`, `test-notification`, settings/bankroll writes) and even side-effecting GETs like `/api/opportunities` — they scrape Pinnacle/Danske Spil and update CLV in the production DB.
+To probe anything side-effecting, use a throwaway scratch container that touches neither production data nor the production network.
 
-## Dev Container
-- Polls GitHub every 30 seconds for changes on the `dsh/dev` branch
-- Automatically reinstalls Python dependencies if `backend/requirements.txt` changes
-- Automatically reinstalls Node dependencies if `frontend/package.json` changes
-- Restarts both backend and frontend after every successful pull
+## Never
+- Never commit database files (`backend/data/`, any `*.db`), `.env` files, or secrets.
+- Never point a scratch container at production data or networks.
 
-## Project Structure
-- Monorepo with `backend/` and `frontend/` directories
-- Backend: FastAPI (Python 3.11), runs on port 8000
-- Frontend: Next.js, runs on port 3000
-- The frontend reaches the backend via `BACKEND_URL=http://localhost:8000`
-
-## Backend Details
-- Framework: FastAPI
-- Entry point: `backend/main.py`
-- Dependencies: `backend/requirements.txt`
-- Database: SQLite at `backend/data/bets.db` — never modify via git
-- Dev command: `uvicorn main:app --reload --host 0.0.0.0 --port 8000`
-
-## Frontend Details
-- Framework: Next.js
-- Dependencies: `frontend/package.json`
-- Dev command: `npm run dev`
-- Port: 3000
-
-## Important Paths
-- Workspace root: `/workspace/market-scanner`
-- Backend code: `/workspace/market-scanner/backend/`
-- Frontend code: `/workspace/market-scanner/frontend/`
-- Data directory: `backend/data/` — mounted volume, never tracked by git
+## Layout
+- Repo root: `/opt/docker-stacks/market-scanner`
+- Backend: `backend/` — FastAPI, entry `backend/main.py`, deps `backend/requirements.txt`
+- Frontend: `frontend/` — Next.js App Router, deps `frontend/package.json`
+- Deploy: `./deploy.sh` · Stack: `docker-compose.yml` · Decisions: `docs/adr/` · Terms: `GLOSSARY.md`
