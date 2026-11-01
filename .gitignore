@@ -6,6 +6,9 @@ venv/
 env/
 backend/.env
 
+# Production data — never commit database files
+*.db
+
 # --- Node / Frontend ---
 node_modules/
 .next/

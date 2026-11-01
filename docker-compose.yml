@@ -3,12 +3,12 @@ services:
   backend:
     container_name: market-scanner-backend
     build:
-      # Using the explicit object syntax that is proven to work
-      context: /opt/docker-stacks/market-scanner/backend
+      context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
     volumes:
-      - /opt/appdata/market-scanner/bets.db:/app/bets.db
+      #- /opt/appdata/market-scanner/bets.db:/app/bets.db
+      - /opt/appdata/market-scanner:/app/data
     env_file:
       - /opt/appdata/market-scanner/.env
     networks:
@@ -18,8 +18,7 @@ services:
   frontend:
     container_name: market-scanner-frontend
     build:
-      # Using the explicit object syntax that is proven to work
-      context: /opt/docker-stacks/market-scanner/frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         - BACKEND_URL=http://market-scanner-backend:8000
