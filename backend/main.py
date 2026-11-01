@@ -1297,6 +1297,11 @@ class NotificationRule(BaseModel):
 # ---------------------------------------------------------
 # 5. API ENDPOINT
 # ---------------------------------------------------------
+@app.get("/api/health")
+def health():
+    """Read-only liveness probe. Safe to call against production — no side effects."""
+    return {"status": "ok"}
+
 @app.get("/api/opportunities")
 def get_opportunities(refresh: bool = False):
     if not API_KEY:
