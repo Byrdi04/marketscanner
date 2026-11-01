@@ -9,6 +9,7 @@ interface GlobalConfig {
   ntfy_topic: string;
   cooldown_minutes: number;
   paper_bets_limit: number;
+  suppress_placed_exposed: boolean;
 }
 
 interface NotificationLogEntry {
@@ -74,6 +75,7 @@ export default function Settings() {
     ntfy_topic: "",
     cooldown_minutes: 120,
     paper_bets_limit: 5000,
+    suppress_placed_exposed: true,
   });
 
   // Rules
@@ -123,6 +125,7 @@ export default function Settings() {
         ntfy_topic: settingsJson.config.ntfy_topic || "",
         cooldown_minutes: parseInt(settingsJson.config.cooldown_minutes || "120"),
         paper_bets_limit: parseInt(settingsJson.config.paper_bets_limit || "5000"),
+        suppress_placed_exposed: settingsJson.config.suppress_placed_exposed !== "false",
       });
 
       setLog(settingsJson.recent_log || []);
@@ -561,6 +564,33 @@ export default function Settings() {
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                     config.enabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* SKIP ALREADY-PLACED / EXPOSED TOGGLE */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-200">Skip already-placed / exposed bets</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Suppress alerts for bets already placed, or matches you already have a bet on
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    suppress_placed_exposed: !prev.suppress_placed_exposed,
+                  }))
+                }
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  config.suppress_placed_exposed ? "bg-emerald-500" : "bg-slate-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    config.suppress_placed_exposed ? "translate-x-6" : "translate-x-1"
                   }`}
                 />
               </button>

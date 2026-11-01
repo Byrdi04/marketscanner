@@ -259,6 +259,7 @@ def load_notification_config():
         "ntfy_topic": NTFY_TOPIC or "",
         "cooldown_minutes": "120",
         "paper_bets_limit": "5000",
+        "suppress_placed_exposed": "true",
     }
 
     try:
@@ -436,6 +437,38 @@ def check_and_notify(opportunities):
 
         if not qualifying:
             return
+
+        # 3.5 (Optional) Skip already-placed / already-exposed bets.
+        # An opportunity is skipped when an open (Pending) bet already covers
+        # this exact bet, OR when any open bet already exists on the same match.
+        # Gated by the 'suppress_placed_exposed' setting (on by default).
+        if config.get("suppress_placed_exposed", "true") == "true":
+            conn = sqlite3.connect(DB_NAME)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT match_name, selection, market_type, handicap "
+                "FROM bets WHERE status = 'Pending'"
+            )
+            pending = cursor.fetchall()
+            conn.close()
+
+            exposed_matches = {b['match_name'] for b in pending}
+            placed_keys = {
+                (b['match_name'], b['selection'], b['market_type'], b['handicap'])
+                for b in pending
+            }
+
+            filtered = {}
+            for opp in qualifying.values():
+                key = (opp['match'], opp['selection'], opp['type'], opp['line'])
+                if key in placed_keys or opp['match'] in exposed_matches:
+                    continue
+                filtered[opp['id']] = opp
+            qualifying = filtered
+
+            if not qualifying:
+                return
 
         # 4. Check deduplication
         conn = sqlite3.connect(DB_NAME)
@@ -1247,6 +1280,7 @@ class NotificationConfig(BaseModel):
     ntfy_topic: str
     cooldown_minutes: int
     paper_bets_limit: int = 5000
+    suppress_placed_exposed: bool = True
 
 class NotificationRule(BaseModel):
     rule_number: int
@@ -1595,6 +1629,7 @@ def post_notification_settings(config: NotificationConfig):
             "ntfy_topic": config.ntfy_topic.strip(),
             "cooldown_minutes": str(config.cooldown_minutes),
             "paper_bets_limit": str(config.paper_bets_limit),
+            "suppress_placed_exposed": "true" if config.suppress_placed_exposed else "false",
         }
         save_notification_config(save_dict)
         return {"message": "Settings saved successfully"}
