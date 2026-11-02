@@ -11,6 +11,8 @@ services:
       - /opt/appdata/market-scanner:/app/data
     env_file:
       - /opt/appdata/market-scanner/.env
+    environment:
+      - TZ=Europe/Copenhagen
     networks:
       - market-net
 

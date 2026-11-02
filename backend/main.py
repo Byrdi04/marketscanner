@@ -31,12 +31,29 @@ scheduler.start()
 def run_scheduled_scan():
     """
     The Heartbeat: Runs automatically to harvest data.
-    Checks time to ensure we only run during active hours (07:00 - 23:00).
+    Only runs during the configured active-hours window (Europe/Copenhagen;
+    defaults 07:00 - 23:00). Both bounds are user-configurable.
     """
-    # 1. Check Business Hours (Server Time)
+    # 1. Check Active Hours (container local time = Europe/Copenhagen)
+    cfg = load_notification_config()
+    try:
+        start_hour = int(cfg.get("business_hours_start", "7"))
+        end_hour = int(cfg.get("business_hours_end", "23"))
+    except (TypeError, ValueError):
+        start_hour, end_hour = 7, 23
+
     current_hour = datetime.now().hour
-    if current_hour < 7:
-        print(f"💤 Skipping Scan (Night Hours: {current_hour}:00)")
+    if start_hour <= end_hour:
+        in_window = start_hour <= current_hour < end_hour
+    else:
+        # Window wraps past midnight, e.g. 22:00 - 04:00
+        in_window = current_hour >= start_hour or current_hour < end_hour
+
+    if not in_window:
+        print(
+            f"💤 Skipping Scan (Outside active hours "
+            f"{start_hour:02d}:00-{end_hour:02d}:00; now {current_hour:02d}:00)"
+        )
         return
 
     print("⏰ Starting Scheduled Market Scan...")
@@ -260,6 +277,8 @@ def load_notification_config():
         "cooldown_minutes": "120",
         "paper_bets_limit": "5000",
         "suppress_placed_exposed": "true",
+        "business_hours_start": "7",
+        "business_hours_end": "23",
     }
 
     try:
@@ -1281,6 +1300,8 @@ class NotificationConfig(BaseModel):
     cooldown_minutes: int
     paper_bets_limit: int = 5000
     suppress_placed_exposed: bool = True
+    business_hours_start: int = 7
+    business_hours_end: int = 23
 
 class NotificationRule(BaseModel):
     rule_number: int
@@ -1635,6 +1656,8 @@ def post_notification_settings(config: NotificationConfig):
             "cooldown_minutes": str(config.cooldown_minutes),
             "paper_bets_limit": str(config.paper_bets_limit),
             "suppress_placed_exposed": "true" if config.suppress_placed_exposed else "false",
+            "business_hours_start": str(config.business_hours_start),
+            "business_hours_end": str(config.business_hours_end),
         }
         save_notification_config(save_dict)
         return {"message": "Settings saved successfully"}

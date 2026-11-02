@@ -10,6 +10,8 @@ interface GlobalConfig {
   cooldown_minutes: number;
   paper_bets_limit: number;
   suppress_placed_exposed: boolean;
+  business_hours_start: number;
+  business_hours_end: number;
 }
 
 interface NotificationLogEntry {
@@ -76,6 +78,8 @@ export default function Settings() {
     cooldown_minutes: 120,
     paper_bets_limit: 5000,
     suppress_placed_exposed: true,
+    business_hours_start: 7,
+    business_hours_end: 23,
   });
 
   // Rules
@@ -126,6 +130,8 @@ export default function Settings() {
         cooldown_minutes: parseInt(settingsJson.config.cooldown_minutes || "120"),
         paper_bets_limit: parseInt(settingsJson.config.paper_bets_limit || "5000"),
         suppress_placed_exposed: settingsJson.config.suppress_placed_exposed !== "false",
+        business_hours_start: parseInt(settingsJson.config.business_hours_start || "7"),
+        business_hours_end: parseInt(settingsJson.config.business_hours_end || "23"),
       });
 
       setLog(settingsJson.recent_log || []);
@@ -643,6 +649,53 @@ export default function Settings() {
               </div>
               <p className="text-xs text-slate-500 mt-1">
                 Minimum time between repeat alerts for the same unchanged bet
+              </p>
+            </div>
+
+            {/* ACTIVE SCAN HOURS */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Active Scan Hours (Europe/Copenhagen)
+              </label>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-400">From</span>
+                <select
+                  className="input"
+                  value={config.business_hours_start}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      business_hours_start: parseInt(e.target.value),
+                    }))
+                  }
+                >
+                  {HOUR_OPTIONS.map((h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, "0")}:00
+                    </option>
+                  ))}
+                </select>
+                <span className="text-sm text-slate-400">to</span>
+                <select
+                  className="input"
+                  value={config.business_hours_end}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      business_hours_end: parseInt(e.target.value),
+                    }))
+                  }
+                >
+                  {HOUR_OPTIONS.map((h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, "0")}:00
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Automatic scans only run inside this window. Default 07:00–23:00.
+                Overnight windows (e.g. 22→04) are supported.
               </p>
             </div>
           </div>
