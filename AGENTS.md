@@ -18,6 +18,8 @@ When finished, tell the user:
 - Backend container `market-scanner-backend` (FastAPI, port 8000); frontend container `market-scanner-frontend` (Next.js, port 3000).
 - Served through the npmplus reverse proxy on the shared `proxy-net` network. Persistent data lives **outside the repo** at `/opt/appdata/market-scanner/` (production SQLite `bets.db` + `.env`, mounted at container `/app/data`).
 - Dependency changes (`backend/requirements.txt`, `frontend/package.json`) take effect on the next `./deploy.sh` rebuild.
+- Both containers run `TZ=Europe/Copenhagen`. Wall-clock logic in `backend/main.py` (the heartbeat scan gate and the 05:00 settlement cron) assumes local time; do not reinterpret these as UTC.
+- The automatic-scan window is not hardcoded: it reads `business_hours_start` / `business_hours_end` (default `7`/`23`, DB key-value store `notification_config`) and enforces both bounds, including overnight windows (start > end). Editable in Settings → Push Notifications → Active Scan Hours.
 
 ## Prod surface (the only allowed target of verification)
 Against production, only these are side-effect-free: `http://odds.lan/` (frontend reachable) and `GET http://odds.lan/api/health` (backend liveness). An agent may call those, and nothing else on production, unless the user signs off on the specific call first. In particular: action endpoints (`place-bet`, `settle-bets`, `force-scan`, `test-notification`, settings/bankroll writes) and even side-effecting GETs like `/api/opportunities` — they scrape Pinnacle/Danske Spil and update CLV in the production DB.
