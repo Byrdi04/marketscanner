@@ -19,3 +19,15 @@ _Avoid_: App, service
 **Prod surface**:
 The read-only verification surface of the production stack: `http://odds.lan` (LAN) and `https://odds.partitest.dk` (public), allowing reachability checks plus `GET /api/health`. It is production, not a test environment.
 _Avoid_: Staging, test env
+
+**Scan league**:
+A competition the heartbeat scans as its own configured unit — currently NBA and NCAA — each with its own Danske Spil tag, Pinnacle provider + sport, market scope, and score source. Paper bets are tagged with their scan league.
+_Avoid_: Sport, "league" alone (ambiguous with a betting-market league)
+
+**Pinnacle provider**:
+The configured sharp-odds feed a scan league draws Pinnacle prices from: The Odds API (legacy, NBA) or pinnapi (NCAA). A per-league provider selector is the seam to migrate NBA off the legacy feed later.
+_Avoid_: Pinnacle API, the odds feed
+
+**NCAA scan**:
+The data-gathering pass that logs `league='NCAA'` paper bets only. It deliberately touches no real bets, no portfolio, and no analytics until a strategy is developed from the collected data.
+_Avoid_: Adding NCAA, the NCAA feature

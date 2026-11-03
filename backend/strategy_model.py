@@ -67,12 +67,13 @@ def build_model(
     max_minutes: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 1e9,
+    league: str | None = None,
 ) -> dict:
     base = {"available": SKLEARN_AVAILABLE}
     if not SKLEARN_AVAILABLE:
         return base
 
-    df = _add_features(load_settled())
+    df = _add_features(load_settled(league=league))
     used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
     if len(used) < 60:
         return {**base, "error": "Need ≥ 60 settled bets in this view to fit the model.", "meta": meta}
@@ -195,13 +196,14 @@ def build_sweep(
     hours_grid=(0.0, 3.0, 6.0, 12.0),
     split_frac: float = SPLIT_FRACTION,
     min_n: int = 5,
+    league: str | None = None,
 ) -> dict:
     """Bets/month vs ROI frontier over (min EV × min hours) rules, holdout-only."""
     base = {"available": SKLEARN_AVAILABLE}
     if not SKLEARN_AVAILABLE:
         return base
 
-    df = _add_features(load_settled())
+    df = _add_features(load_settled(league=league))
     used, meta = apply_view(
         df, dedup, max_ev=max_ev, max_minutes=max_hours * 60.0,
         min_odds=min_odds, max_odds=max_odds,

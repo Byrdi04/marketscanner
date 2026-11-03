@@ -58,10 +58,16 @@ def _bucket(series: pd.Series, edges, labels) -> pd.Series:
     return pd.cut(series, bins=bins, right=False, labels=labels)
 
 
-def load_settled() -> pd.DataFrame:
-    """Load settled paper bets with derived features."""
+def load_settled(league=None) -> pd.DataFrame:
+    """Load settled paper bets with derived features. When `league` is given,
+    rows are constrained to that league so NBA and NCAA are never mixed."""
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT * FROM paper_bets", conn)
+    if league:
+        df = pd.read_sql_query(
+            "SELECT * FROM paper_bets WHERE league = ?", conn, params=(league,)
+        )
+    else:
+        df = pd.read_sql_query("SELECT * FROM paper_bets", conn)
     conn.close()
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
@@ -257,9 +263,12 @@ def build_evidence(
     max_minutes: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 1e9,
+    league: str | None = None,
 ) -> dict:
-    df = load_settled()
+    df = load_settled(league=league)
     used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
+    if league:
+        meta["league"] = league
 
     months = _months_span(used)
     overall = None

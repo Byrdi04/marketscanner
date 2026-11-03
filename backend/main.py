@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from thefuzz import process
 import sqlite3
+import re
 from pydantic import BaseModel
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -21,6 +22,7 @@ from strategy_model import build_model, build_sweep
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+PINNAPI_KEY = os.getenv("PINNAPI_KEY")
 
 app = FastAPI()
 
@@ -58,22 +60,50 @@ def run_scheduled_scan():
 
     print("⏰ Starting Scheduled Market Scan...")
 
-    # 2. Fetch Data (Force Fresh Pinnacle = 1 Credit)
-    danske = fetch_danske_spil()
-    if not danske:
-        print("❌ Scheduled Scan: Danske Spil failed.")
-        return
+    # 2. Iterate each configured league (NBA then NCAA). Fetch fresh odds per
+    # league so paper data is tagged and snapshots are league-scoped.
+    total_opps = 0
+    for league in LEAGUES:
+        total_opps += _scan_league(league)
 
-    # We force refresh=True to get the new snapshot
-    pinnacle = fetch_pinnacle_cached(require_fresh=True)
-    
-    # 3. Analyze & Log
-    # This automatically calls our new log_paper_bets function
+    print(f"✅ Scheduled Scan Complete. Processed {total_opps} opps across {len(LEAGUES)} leagues.")
+
+
+def _scan_league(league):
+    """
+    Runs one league through the full paper-data pipeline: fetch Danske +
+    Pinnacle, run the analysis, log paper bets, and (only for betting leagues)
+    evaluate push notifications. Returns the number of opportunities found.
+    """
+    name = league["name"]
+    print(f"🏀 Scanning league: {name}")
+    danske = fetch_danske_spil(league)
+    if not danske:
+        print(f"❌ {name} Scan: Danske Spil failed.")
+        return 0
+
+    pinnacle = fetch_pinnacle_for_league(league, require_fresh=True)
+    if not pinnacle:
+        print(f"⚠️ {name} Scan: no Pinnacle data.")
+        return 0
+
     opportunities = run_analysis(danske, pinnacle)
     log_paper_bets(opportunities)
-    check_and_notify(opportunities)
-    
-    print(f"✅ Scheduled Scan Complete. Processed {len(opportunities)} opps.")
+
+    # Only real-bet leagues nudge; paper-data leagues (NCAA) never notify.
+    if league.get("notify", True):
+        check_and_notify(opportunities)
+
+    print(f"   {name}: {len(opportunities)} opps logged.")
+    return len(opportunities)
+
+
+def fetch_pinnacle_for_league(league, require_fresh=True):
+    """Route the Pinnacle pull to the league's configured provider."""
+    provider = league["pinnacle"].get("provider", "the_odds_api")
+    if provider == "pinnapi":
+        return fetch_pinnapi_cached(league, require_fresh=require_fresh)
+    return fetch_pinnacle_cached(require_fresh=require_fresh)
 
 # --- CONFIGURATION ---
 # Allow your Next.js app (running on port 3000) to talk to this API
@@ -99,6 +129,77 @@ latest_quota = {
     "used": "Unknown"
 }
 
+# ------------------------------------------------------------------
+# LEAGUE CONFIGURATION (config-driven multi-league scan)
+# ------------------------------------------------------------------
+# Each configured league is scanned as its own unit by the heartbeat.
+# Paper bets are tagged with the league name, mirroring the NBA -> NCAA
+# data-gathering arc. NCAA is intentionally paper-data-only for now.
+LEAGUES = [
+    {
+        "name": "NBA",
+        "danske": {
+            "tag": "18608",
+            "window": "rolling",        # rolling 24h window
+            "rolling_days": 1,
+            "max_events": 50,
+            "exclusions": [],
+        },
+        "pinnacle": {
+            "provider": "the_odds_api", # legacy feed, kept for continuity
+            "sport": "basketball_nba",
+            "markets": ["spreads"],
+        },
+        "match_strategy": "home_token",
+        "score_source": "nba",
+        "notify": True,                 # real-bet league -> notifies
+    },
+    {
+        "name": "NCAA",
+        "danske": {
+            "tag": "18615",
+            "window": "fixed",          # full-season window
+            "start": "2026-11-01 00:00:00",
+            "end": "2027-05-31 23:59:59",
+            "max_events": 64,
+            "exclusions": [20769, 22796, 22797],
+        },
+        "pinnacle": {
+            "provider": "pinnapi",      # replacement sharp-odds feed
+            "sport_id": 3,              # basketball (includes NBA + NCAA)
+            "event_type": "prematch",
+            # pinnapi does not enumerate league labels; tune this allowlist
+            # from the one-time distinct-league_name logger output.
+            "league_name_allowlist": ["NCAA"],
+            "markets": ["money_line", "spread", "total"],
+        },
+        "match_strategy": "full_string",
+        "score_source": None,           # NCAA settlement deferred this phase
+        "notify": False,                # data-gathering only — no bet nudges
+    },
+]
+
+NCAA_MATCH_THRESHOLD = 90
+
+
+def _danske_window(league):
+    """Return (start_iso, end_iso) for the league's configured window."""
+    d = league["danske"]
+    if d.get("window") == "fixed":
+        start = datetime.strptime(d["start"], "%Y-%m-%d %H:%M:%S").strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        end = datetime.strptime(d["end"], "%Y-%m-%d %H:%M:%S").strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        return start, end
+    # rolling window
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    future = (datetime.utcnow() + timedelta(days=d.get("rolling_days", 1))).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+    return now, future
+
+
+def _league_by_name(name):
+    return next((l for l in LEAGUES if l["name"] == name), None)
 # ---------------------------------------------------------
 # CLV SNIPER LOGIC (Background Tasks)
 # ---------------------------------------------------------
@@ -177,19 +278,26 @@ def restore_clv_jobs():
 # ---------------------------------------------------------
 # 1. DATA FETCHING: DANSKE SPIL (Free - No Cache Needed)
 # ---------------------------------------------------------
-def fetch_danske_spil():
-    print("Fetching Danske Spil data...")
+def fetch_danske_spil(league=None):
+    """Fetch Danske Spil events for a league config (defaults to the NBA config)."""
+    if league is None:
+        league = _league_by_name("NBA") or LEAGUES[0]
+    print(f"Fetching Danske Spil ({league['name']})...")
     session = tls_client.Session(
         client_identifier="chrome_120",
         random_tls_extension_order=True
     )
 
-    now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    future = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    
-    # NBA ID: 18608. Change this ID for other leagues.
-    league_id = "18608" 
-    url = f"https://content.sb.danskespil.dk/content-service/api/v1/q/event-list?startTimeFrom={now}&startTimeTo={future}&maxEvents=50&drilldownTagIds={league_id}&includeChildMarkets=true&prioritisePrimaryMarkets=true"
+    start, end = _danske_window(league)
+    max_events = league["danske"].get("max_events", 50)
+    exclusions = league["danske"].get("exclusions", [])
+
+    url = (f"https://content.sb.danskespil.dk/content-service/api/v1/q/event-list"
+           f"?startTimeFrom={start}&startTimeTo={end}&maxEvents={max_events}"
+           f"&drilldownTagIds={league['danske']['tag']}")
+    if exclusions:
+        url += f"&excludedTagIds={','.join(str(x) for x in exclusions)}"
+    url += "&includeChildMarkets=true&prioritisePrimaryMarkets=true"
 
     headers = {
         "authority": "content.sb.danskespil.dk",
@@ -200,12 +308,12 @@ def fetch_danske_spil():
     try:
         response = session.get(url, headers=headers)
         data = response.json()
-        return parse_danske_spil(data)
+        return parse_danske_spil(data, league["name"])
     except Exception as e:
         print(f"Error fetching Danske Spil: {e}")
         return []
 
-def parse_danske_spil(json_response):
+def parse_danske_spil(json_response, league="NBA"):
     grouped_events = []
     raw_events = json_response.get('data', {}).get('events', [])
     if not raw_events:
@@ -223,7 +331,7 @@ def parse_danske_spil(json_response):
             "home_team": home_team_name,
             "away_team": away_team_name,
             "commence_time": event.get('startTime'),
-            "league": "NBA",
+            "league": league,
             "markets": [] 
         }
         
@@ -600,8 +708,8 @@ def fetch_pinnacle_cached(require_fresh=True):
         raw_data = response.json()
         clean_data = parse_pinnacle_data(raw_data)
 
-        # Save to Database immediately
-        save_snapshot_to_db(clean_data)
+        # Save to Database immediately (NBA-stamped snapshot)
+        save_snapshot_to_db(clean_data, "NBA")
         
         # Update Cache
         pinnacle_cache["data"] = clean_data
@@ -627,6 +735,151 @@ def parse_pinnacle_data(api_response):
         clean_data.append(clean_event)
     return clean_data
 
+# ---------------------------------------------------------
+# PINNAPI FEED (replacement sharp-odds source; used for NCAA)
+# ---------------------------------------------------------
+PINNAPI_BASE = "https://pinnapi.com"
+
+# Per-league in-memory cache for pinnapi pulls (avoids burn on quota).
+pinnapi_cache = {}
+
+# One-time distinct-league_name logger so the allowlist can be tuned from the
+# real feed rather than guessed (pinnapi does not enumerate league labels).
+_seen_pinnapi_leagues = set()
+
+
+def _log_pinnapi_league(league_name):
+    if league_name and league_name not in _seen_pinnapi_leagues:
+        _seen_pinnapi_leagues.add(league_name)
+        print(f"🪧 pinnapi distinct league_name: {league_name!r}")
+
+
+def fetch_pinnapi_cached(league, require_fresh=True):
+    """Fetch prematch markets for a league from pinnapi and normalize to the
+    The Odds API event shape. One fresh pull saves a league-stamped snapshot."""
+    global pinnapi_cache
+    cached = pinnapi_cache.get(league["name"])
+    current_time = time.time()
+
+    if not require_fresh and cached and cached["data"]:
+        return cached["data"]
+    if cached and (current_time - cached["last_updated"] < CACHE_DURATION):
+        return cached["data"]
+
+    if not PINNAPI_KEY:
+        print("⚠️ PINNAPI_KEY not set; skipping pinnapi fetch.")
+        return cached["data"] if cached else []
+
+    url = f"{PINNAPI_BASE}/kit/v1/markets"
+    params = {
+        "sport_id": league["pinnacle"].get("sport_id", 3),
+        "event_type": league["pinnacle"].get("event_type", "prematch"),
+    }
+    headers = {"x-portal-apikey": PINNAPI_KEY}
+
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=20)
+        resp.raise_for_status()
+        clean_data = parse_pinnapi_data(resp.json(), league)
+
+        if clean_data:
+            save_snapshot_to_db(clean_data, league["name"])
+
+        pinnapi_cache[league["name"]] = {
+            "last_updated": current_time,
+            "data": clean_data,
+        }
+        return clean_data
+    except Exception as e:
+        print(f"Error fetching pinnapi ({league['name']}): {e}")
+        return cached["data"] if cached else []
+
+
+def _pick_primary_line(entries):
+    """Pick the main line from a pinnapi market dict by highest allowed stake."""
+    if not entries:
+        return None
+    return max(entries.items(), key=lambda kv: float(kv[1].get("max", 0) or 0))[1]
+
+
+def parse_pinnapi_data(api_response, league):
+    """Normalize pinnapi's num_0 game market into The Odds API 'markets' shape
+    so run_analysis / calculate_fair_probability / CLV helpers work unchanged."""
+    pconf = league["pinnacle"]
+    allowlist = pconf.get("league_name_allowlist")
+    allowed_markets = pconf.get("markets", ["money_line", "spread", "total"])
+
+    all_events = api_response.get("events", []) if api_response else []
+    clean_data = []
+    seen = 0
+
+    for event in all_events:
+        league_name = event.get("league_name")
+        # Log every distinct league_name once (for tuning the allowlist).
+        _log_pinnapi_league(league_name)
+
+        if allowlist and league_name not in allowlist:
+            continue
+        seen += 1
+
+        periods = event.get("periods") or {}
+        num_0 = periods.get("num_0") or {}
+        markets = _pinnapi_num0_to_markets(event, num_0, allowed_markets)
+
+        home = resolve_team_name(event.get("home") or "")
+        away = resolve_team_name(event.get("away") or "")
+        if not home or not away or not markets:
+            continue
+
+        clean_data.append({
+            "home_team": home,
+            "away_team": away,
+            "commence_time": event.get("starts"),
+            "league": league["name"],
+            "markets": markets,
+        })
+
+    if allowlist:
+        print(f"🌐 pinnapi ({league['name']}): {len(clean_data)}/{seen} events in "
+              f"allowlist {allowlist}.")
+    return clean_data
+
+
+def _pinnapi_num0_to_markets(event, num_0, allowed_markets):
+    """Convert a pinnapi num_0 game market into The Odds API market objects."""
+    home = event.get("home") or ""
+    away = event.get("away") or ""
+    markets_out = []
+
+    if "money_line" in allowed_markets and num_0.get("money_line"):
+        ml = num_0["money_line"]
+        outcomes = []
+        if ml.get("home"):
+            outcomes.append({"name": resolve_team_name(home), "price": float(ml["home"])})
+        if ml.get("away"):
+            outcomes.append({"name": resolve_team_name(away), "price": float(ml["away"])})
+        if outcomes:
+            markets_out.append({"key": "h2h", "outcomes": outcomes})
+
+    if "spread" in allowed_markets and num_0.get("spreads"):
+        line = _pick_primary_line(num_0["spreads"])
+        if line and line.get("home") and line.get("away"):
+            hdp = float(line.get("hdp", 0.0))
+            markets_out.append({"key": "spreads", "outcomes": [
+                {"name": resolve_team_name(home), "point": hdp, "price": float(line["home"])},
+                {"name": resolve_team_name(away), "point": -hdp, "price": float(line["away"])},
+            ]})
+
+    if "total" in allowed_markets and num_0.get("totals"):
+        line = _pick_primary_line(num_0["totals"])
+        if line and line.get("over") and line.get("under"):
+            pts = float(line.get("points", 0.0))
+            markets_out.append({"key": "totals", "outcomes": [
+                {"name": "Over", "point": pts, "price": float(line["over"])},
+                {"name": "Under", "point": pts, "price": float(line["under"])},
+            ]})
+
+    return markets_out
 def update_clv_for_placed_bets(pinnacle_events):
     """
     Loops through pending bets in DB. If the game is found in the fresh
@@ -690,65 +943,184 @@ def update_clv_for_placed_bets(pinnacle_events):
 
 def find_clv_for_paper_bet(bet_row):
     """
-    Scans the market_snapshots table for the snapshot closest 
-    to the game start time to estimate CLV.
+    Scans the market_snapshots table for the snapshot closest to the game
+    start time to estimate CLV. Scoped to the bet's league so NBA and NCAA
+    closing-line snapshots are never interleaved.
     """
     game_start = bet_row['commence_time']
-    # 1. Find the latest snapshot BEFORE or AT game start
+    league = bet_row.get('league', 'NBA')
+    league_conf = _league_by_name(league)
+    strategy = league_conf.get("match_strategy") if league_conf else None
+
+    # 1. Find the latest snapshot BEFORE or AT game start, in the SAME league.
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+
     cursor.execute('''
-        SELECT raw_json FROM market_snapshots 
-        WHERE timestamp <= ? 
-        ORDER BY timestamp DESC 
+        SELECT raw_json FROM market_snapshots
+        WHERE timestamp <= ? AND league = ?
+        ORDER BY timestamp DESC
         LIMIT 1
-    ''', (game_start,))
-    
+    ''', (game_start, league))
+
     row = cursor.fetchone()
     conn.close()
-    
-    if not row:
-        return None # No data found before game start
-        
-    pinnacle_events = json.loads(row['raw_json'])
-    
-    # 2. Extract Data (Reusing your existing logic)
-    # We need to find the specific match and market in this old snapshot
-    pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
-    
-    if not pinnacle_home_teams:
-        return None
-    
-    # Fuzzy match the team name
-    result = process.extractOne(bet_row['match_name'].split(" vs ")[0], pinnacle_home_teams)
-    if not result:
-        return None
-    match_name, score = result
-    if score < 85: return None
 
-    p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
-    
+    if not row:
+        return None  # No data found before game start
+
+    pinnacle_events = json.loads(row['raw_json'])
+    if not pinnacle_events:
+        return None
+
+    # 2. Match the full "Home vs Away" matchup, using the league's strategy.
+    home, sep, away = bet_row['match_name'].partition(" vs ")
+    p_event = match_pinnacle_event(
+        home, away, pinnacle_events, league=league, min_match_score=85,
+        strategy=strategy,
+    )
+    if not p_event:
+        return None
+
     # Map Market Type
     p_market_key = {'MoneyLine': 'h2h', 'Spread': 'spreads', 'Total': 'totals'}.get(bet_row['market_type'])
     if not p_market_key or not p_event.get('markets'): return None
-    
+
     p_target_market = next((m for m in p_event['markets'] if m['key'] == p_market_key), None)
     if not p_target_market: return None
-    
+
     # Calculate Fair Odds
     fair_probs = calculate_fair_probability(p_target_market['outcomes'])
-    
-    # Fuzzy match selection
-    p_selection, sel_score = process.extractOne(bet_row['selection'], list(fair_probs.keys()))
+
+    # Fuzzy match selection (alias-resolve team names on multi-team leagues)
+    selection = resolve_team_name(bet_row['selection']) if strategy == "full_string" else bet_row['selection']
+    p_selection, sel_score = process.extractOne(selection, list(fair_probs.keys()))
     if sel_score < 85: return None
-    
+
     # Return the Fair Odds (CLV)
     fair_prob = fair_probs[p_selection]
     return round(1 / fair_prob, 2)
 
 # ---------------------------------------------------------
+# 3.5 TEAM MATCHING (normalization + persistent alias map)
+# ---------------------------------------------------------
+# Single-token fuzzy matching is unsafe across ~350 NCAA teams (shared
+# "Cowboys/Tigers/State/Texas" colliders and Danish-book spelling variants).
+# For NCAA we normalize both sides, resolve a persistent alias map, and match
+# on the full "Home vs Away" string with a higher threshold.
+
+_team_aliases = None  # lazy-loaded dict {normalized_alias: canonical_name}
+
+
+def _load_team_aliases():
+    global _team_aliases
+    if _team_aliases is not None:
+        return _team_aliases
+    _team_aliases = {}
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT alias, canonical FROM team_aliases")
+        for alias, canonical in cursor.fetchall():
+            _team_aliases[alias] = canonical
+        conn.close()
+    except Exception as e:
+        print(f"Error loading team aliases: {e}")
+    return _team_aliases
+
+
+def normalize_team_name(name):
+    """Lowercase, collapse whitespace, and neutralise pun/pub separators that
+    vary between Danske Spil and pinnapi (hyphens/dots). Used for fuzzy keys."""
+    if not name:
+        return ""
+    n = " ".join(str(name).strip().lower().split())
+    n = n.replace("-", " ")
+    n = n.replace(".", " ")
+    n = re.sub(r"\s+", " ", n).strip()
+    return n
+
+
+def resolve_team_name(name):
+    """Apply the persistent alias map to a raw team name, with normalization."""
+    if not name:
+        return ""
+    raw = str(name).strip()
+    normalized = normalize_team_name(raw)
+    return _load_team_aliases().get(normalized, normalized)
+
+
+_mismatch_logged = set()
+
+
+def _log_unmatched_pair(d_home, d_away, candidates, league):
+    """Log one unmatched Danske vs pinnacle pair per distinct matchup so the
+    alias map can grow from real data without flooding the log."""
+    key = (league, normalize_team_name(d_home), normalize_team_name(d_away))
+    if key in _mismatch_logged:
+        return
+    _mismatch_logged.add(key)
+    print(
+        f"🔍 {league} unmatched: "
+        f"{d_home} vs {d_away} | rank: {candidates}"
+    )
+
+
+def _match_full_string(d_home, d_away, pinnacle_events, threshold=NCAA_MATCH_THRESHOLD):
+    """Match on the full normalized 'Home vs Away' string: exact first, then
+    a high-threshold fuzzy match. Logs unmatched pairs for the alias map."""
+    if not pinnacle_events:
+        return None
+    d_h = resolve_team_name(d_home)
+    d_a = resolve_team_name(d_away)
+    d_matchup = f"{d_h} vs {d_a}"
+
+    candidates = []
+    for p in pinnacle_events:
+        ph = resolve_team_name(p.get("home_team"))
+        pa = resolve_team_name(p.get("away_team"))
+        candidates.append((p, f"{ph} vs {pa}"))
+
+    # 1. Exact match on canonical names
+    for p, m in candidates:
+        if m == d_matchup:
+            return p
+
+    # 2. Fuzzy match on the full matchup string
+    keys = [m for _, m in candidates]
+    result = process.extractOne(d_matchup, keys)
+    if not result:
+        _log_unmatched_pair(d_home, d_away, [], "NCAA")
+        return None
+    best_match, score = result
+    if score < threshold:
+        _log_unmatched_pair(d_home, d_away, keys[:3], "NCAA")
+        return None
+    return next(p for p, m in candidates if m == best_match)
+
+
+def match_pinnacle_event(d_home, d_away, pinnacle_events, league="NBA",
+                         min_match_score=80, strategy=None):
+    """Find the Pinnacle event for a Danske matchup, using the league's
+    configured matching strategy."""
+    if not d_home or not pinnacle_events:
+        return None
+    if strategy is None:
+        strategy = (league if isinstance(league, str) else league.get("name", "NBA"))
+
+    if strategy == "full_string":
+        return _match_full_string(d_home, d_away, pinnacle_events)
+
+    # Legacy home-token strategy (NBA / The Odds API continuity)
+    pinnacle_home_teams = [p["home_team"] for p in pinnacle_events]
+    result = process.extractOne(d_home, pinnacle_home_teams)
+    if not result:
+        return None
+    match_name, score = result
+    if score < min_match_score:
+        return None
+    return next(p for p in pinnacle_events if p["home_team"] == match_name)
 # 3. ANALYSIS LOGIC
 # ---------------------------------------------------------
 def calculate_fair_probability(pinnacle_outcomes):
@@ -759,14 +1131,18 @@ def calculate_fair_probability(pinnacle_outcomes):
 
 def run_analysis(danske_events, pinnacle_events, min_match_score=80):
     results = []
-    pinnacle_home_teams = [p['home_team'] for p in pinnacle_events]
+    league = danske_events[0].get('league', 'NBA') if danske_events else 'NBA'
+    league_conf = _league_by_name(league)
+    strategy = league_conf.get("match_strategy") if league_conf else None
 
     for d_event in danske_events:
-        match_name, score = process.extractOne(d_event['home_team'], pinnacle_home_teams)
-        if score < min_match_score: continue
+        p_event = match_pinnacle_event(
+            d_event['home_team'], d_event['away_team'], pinnacle_events,
+            league=league, min_match_score=min_match_score, strategy=strategy,
+        )
+        if not p_event:
+            continue
 
-        p_event = next(p for p in pinnacle_events if p['home_team'] == match_name)
-        
         for d_market in d_event['markets']:
             p_key_map = {'MoneyLine': 'h2h', 'Spread': 'spreads', 'Total': 'totals'}
             p_market_key = p_key_map.get(d_market['type'])
@@ -779,7 +1155,10 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
             fair_probs = calculate_fair_probability(p_target_market['outcomes'])
 
             d_selection = d_market['selection']
-            p_selection, name_score = process.extractOne(d_selection, list(fair_probs.keys()))
+            # Compare through the alias map for multi-team leagues (money-line /
+            # spread selections are team names), but store the original spelling.
+            match_selection = resolve_team_name(d_selection) if strategy == "full_string" else d_selection
+            p_selection, name_score = process.extractOne(match_selection, list(fair_probs.keys()))
             if name_score < min_match_score: continue
 
             # Line Matching Logic
@@ -871,7 +1250,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS market_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            raw_json TEXT
+            raw_json TEXT,
+            league TEXT DEFAULT 'NBA'
+        )
+    ''')
+
+    # 2.5 TABLE: TEAM ALIASES (persistent name reconciliation for multi-team leagues)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS team_aliases (
+            alias TEXT PRIMARY KEY,
+            canonical TEXT NOT NULL
         )
     ''')
 
@@ -969,6 +1357,9 @@ def init_db():
     # Migration: Add league column to paper_bets if missing (for existing DBs)
     _migrate_add_league_column()
 
+    # Migration: Add league column to market_snapshots if missing (for existing DBs)
+    _migrate_add_market_snapshots_league_column()
+
     # Migration: Add shared-rule columns (name, max_ev) if missing
     _migrate_add_rule_columns()
 
@@ -984,6 +1375,22 @@ def _migrate_add_league_column():
     except sqlite3.OperationalError:
         # Column already exists — no problem
         pass
+
+def _migrate_add_market_snapshots_league_column():
+    """Add league to market_snapshots if missing. Historical snapshots are NBA
+    (the only league scanned before NCAA arrived), so backfill them all."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cols = {row[1] for row in cursor.execute("PRAGMA table_info(market_snapshots)").fetchall()}
+        if "league" not in cols:
+            cursor.execute("ALTER TABLE market_snapshots ADD COLUMN league TEXT DEFAULT 'NBA'")
+            cursor.execute("UPDATE market_snapshots SET league = 'NBA' WHERE league IS NULL")
+            conn.commit()
+            print("✅ Migration: Added league column to market_snapshots (backfilled NBA).")
+        conn.close()
+    except Exception as e:
+        print(f"Warning: market_snapshots league migration skipped ({e}).")
 
 def _migrate_add_rule_columns():
     """Add name/max_ev columns to notification_rules if missing (unified rule store).
@@ -1081,9 +1488,10 @@ def migrate_to_rules():
     print("✅ Migration complete. 2 rules created.")
 
 # Helper funktion to save snapshot data to database
-def save_snapshot_to_db(clean_data):
+def save_snapshot_to_db(clean_data, league='NBA'):
     """
-    Saves the cleaned Pinnacle data to the database as a JSON string.
+    Saves the cleaned Pinnacle data to the database as a JSON string, stamped
+    with the source league so CLV lookups never interleave leagues.
     Returns the ID of the new snapshot row.
     """
     try:
@@ -1094,13 +1502,13 @@ def save_snapshot_to_db(clean_data):
         json_str = json.dumps(clean_data)
         
         cursor.execute(
-            "INSERT INTO market_snapshots (raw_json) VALUES (?)", 
-            (json_str,)
+            "INSERT INTO market_snapshots (raw_json, league) VALUES (?, ?)", 
+            (json_str, league)
         )
         new_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        print(f"📸 Snapshot saved to DB with ID: {new_id}")
+        print(f"📸 Snapshot saved to DB with ID: {new_id} ({league})")
         return new_id
     except Exception as e:
         print(f"Error saving snapshot: {e}")
@@ -1565,6 +1973,7 @@ def get_strategy_analysis(
     max_minutes: float = 100000.0,
     min_odds: float = 1.0,
     max_odds: float = 100.0,
+    league: str = "NBA",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -1576,6 +1985,7 @@ def get_strategy_analysis(
         max_minutes=max_minutes,
         min_odds=min_odds,
         max_odds=max_odds,
+        league=league,
     )
 
 @app.get("/api/strategy-model")
@@ -1587,6 +1997,7 @@ def get_strategy_model(
     max_minutes: float = 100000.0,
     min_odds: float = 1.0,
     max_odds: float = 100.0,
+    league: str = "NBA",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -1598,6 +2009,7 @@ def get_strategy_model(
         max_minutes=max_minutes,
         min_odds=min_odds,
         max_odds=max_odds,
+        league=league,
     )
 
 @app.get("/api/strategy-sweep")
@@ -1607,6 +2019,7 @@ def get_strategy_sweep(
     max_hours: float = 1e9,
     min_odds: float = 1.0,
     max_odds: float = 100.0,
+    league: str = "NBA",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -1616,6 +2029,7 @@ def get_strategy_sweep(
         max_hours=max_hours,
         min_odds=min_odds,
         max_odds=max_odds,
+        league=league,
     )
 
 # ---------------------------------------------------------
