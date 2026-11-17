@@ -174,7 +174,7 @@ LEAGUES = [
             "markets": ["money_line", "spread", "total"],
         },
         "match_strategy": "full_string",
-        "score_source": None,           # NCAA settlement deferred this phase
+        "score_source": "ncaa",         # per-league NCAA score connector (ADR-0003)
         "notify": False,                # data-gathering only — no bet nudges
     },
 ]
@@ -1593,52 +1593,55 @@ def log_paper_bets(opportunities):
         print(f"📝 Logged {count_new} new/changed Paper Bets.")
 
 
-def settle_paper_bets(scores_data=None):
+def settle_paper_bets():
     """
     Background task: Grades all pending PAPER bets.
-    Reuses the existing grade_bet logic since column names are identical.
+
+    Each pending bet is graded through its league's per-game score connector
+    (ADR-0003), so no single bulk score fetch is needed. A canceled/postponed
+    game is surfaced as a manual-review marker while staying Pending rather
+    than being auto-graded as a loss.
     """
     print("⚖️ Starting Paper Bet Settlement...")
+    _reset_settlement_caches()
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    # 1. Get Pending Paper Bets
+
+    # 1. Get Pending Paper Bets (already-graded bets are skipped -> idempotent)
     cursor.execute("SELECT * FROM paper_bets WHERE status = 'Pending'")
     pending = cursor.fetchall()
-    
+
     if not pending:
         print("No pending paper bets to settle.")
         conn.close()
         return
 
-    # 2. Get Scores (reuse if passed in, otherwise fetch fresh)
-    if not scores_data:
-        scores_data = fetch_nba_scores()
-    if not scores_data:
-        print("Could not fetch scores for settlement.")
-        conn.close()
-        return
-
     updated_count = 0
-    
-    # 3. Grade each bet
-    for bet in pending:
-        # A. GRADE RESULT
-        new_status, result_str = grade_bet(dict(bet), scores_data)
-        
-        # B. CALCULATE CLV (New Step)
-        clv_odds = find_clv_for_paper_bet(dict(bet))
 
-        # Update if we have a result OR if we found CLV
-        # (Sometimes we might find CLV before the game score is final, which is fine)
-        if (new_status and new_status != 'Pending') or clv_odds:
-            
-            # Prepare Update
-            # If game isn't over yet, keep status as is, but save CLV
-            final_status = new_status if new_status else bet['status']
-            final_result = result_str if result_str else bet['result_score']
-            
+    # 2. Grade each bet
+    for bet in pending:
+        bet_row = dict(bet)
+        # A. GRADE RESULT (per-game connector)
+        new_status, result_str = grade_bet(bet_row)
+
+        # B. CALCULATE CLV (New Step)
+        clv_odds = find_clv_for_paper_bet(bet_row)
+
+        final_status = bet['status']
+        final_result = bet['result_score']
+
+        if new_status and new_status != 'Pending':
+            # Graded Won/Lost/Void
+            final_status = new_status
+            final_result = result_str
+        elif result_str == CANCELED_MARKER:
+            # Canceled/postponed: keep Pending but surface manual-review marker,
+            # never auto-grade as a loss.
+            final_result = result_str
+
+        changed = (final_status != bet['status']) or (final_result != bet['result_score'])
+        if changed or clv_odds:
             cursor.execute(
                 "UPDATE paper_bets SET status = ?, result_score = ?, closing_odds = ? WHERE id = ?",
                 (final_status, final_result, clv_odds, bet['id'])
@@ -1670,21 +1673,24 @@ scheduler.add_job(
 
 print("📅 Automated 'Heartbeat' Scanner scheduled (Every 90 mins).")
 
-# SETTLEMENT: Run once a day at 5:00 AM
+# SETTLEMENT: idempotent run every 4 hours (ADR-0003).
+# Replaces the old 05:00 daily cron: in winter 05:00 CET == 23:00 ET the prior
+# evening, i.e. mid-slate when most NBA/NCAA games are not yet final. Every run
+# is final-only, so it stays cheap and safe to repeat; already-graded bets are
+# skipped, and a run with no Pending bets is a no-op.
 try:
     scheduler.remove_job('daily_settlement')
 except JobLookupError:
     pass
 
 scheduler.add_job(
-    settle_paper_bets, 
-    'cron', 
-    hour=5,      # 05:00 AM
-    minute=0, 
+    settle_paper_bets,
+    'interval',
+    hours=4,
     id='daily_settlement',
     replace_existing=True
 )
-print("⚖️ Daily Settlement scheduled for 05:00 AM.")
+print("⏰ Idempotent settlement scheduled every 4 hours.")
 
 # Run this on startup
 init_db()
@@ -1820,27 +1826,24 @@ def settle_bets():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    # 1. Get Pending Bets
+
+    # 1. Get Pending Bets (grade-through-league commits here are real bets, NBA)
     cursor.execute("SELECT * FROM bets WHERE status = 'Pending'")
     pending_bets = cursor.fetchall()
-    
+
     if not pending_bets:
         conn.close()
         return {"message": "No pending bets to settle"}
 
-    # 2. Get Scores (Once for all bets)
-    scores_data = fetch_nba_scores()
-    if not scores_data:
-        conn.close()
-        return {"message": "Could not fetch scores from API"}
+    _reset_settlement_caches()
 
     updated_count = 0
-    
-    # 3. Loop and Grade
+
+    # 2. Loop and Grade each bet through its league connector
     for bet in pending_bets:
-        new_status, result_str = grade_bet(dict(bet), scores_data)
-        
+        bet_row = dict(bet)
+        new_status, result_str = grade_bet(bet_row)
+
         if new_status and new_status != 'Pending':
             cursor.execute(
                 "UPDATE bets SET status = ?, result_score = ? WHERE id = ?",
@@ -1848,13 +1851,20 @@ def settle_bets():
             )
             updated_count += 1
             print(f"Settled Bet {bet['id']}: {new_status}")
+        elif result_str == CANCELED_MARKER:
+            # Canceled/postponed: surface manual-review marker, keep Pending.
+            cursor.execute(
+                "UPDATE bets SET result_score = ? WHERE id = ?",
+                (result_str, bet['id'])
+            )
+            print(f"Marked Bet {bet['id']}: canceled/postponed (manual review)")
 
     conn.commit()
     conn.close()
 
-    # Trigger Paper Settlement too (reuse the scores we already fetched)
-    settle_paper_bets(scores_data=scores_data)
-    
+    # Trigger Paper Settlement too
+    settle_paper_bets()
+
     return {"message": f"Settled {updated_count} bets", "checked": len(pending_bets)}
 
 @app.get("/api/paper-bets")
@@ -2365,204 +2375,518 @@ NBA_TEAM_NAME_MAP = {
     # "Pinnacle/Danske name": "Official NBA API name",
 }
 
-def fetch_nba_scores_official(days_back=3):
-    """
-    Fetches NBA scores using the official NBA API.
-    Returns data in the same format as fetch_nba_scores() so grade_bet() needs no changes.
-    """
-    from nba_api.stats.endpoints import leaguegamefinder
-    import time as time_module
+# ---------------------------------------------------------
+# Per-league score connectors (ADR-0003)
+#
+# Settlement is driven by a per-league connector behind each league's
+# `score_source` key in LEAGUES[]. A connector takes (home, away,
+# commence_time) and returns the FINAL score for that one specific game,
+# disambiguated by game day (America/New_York) and final-only. Zero or more
+# than one finished candidate => Pending + log; never a fuzzy-string guess.
+# ---------------------------------------------------------
 
-    print("🏀 Fetching scores via NBA API...")
+ET_TZ = pytz.timezone("America/New_York")
 
+# NCAA self-hosted scores API (henrygd/ncaa-api), reached by service DNS on
+# market-net. Overridable for local testing (e.g. the public demo instance).
+NCAA_API_BASE = os.getenv("NCAA_API_BASE", "http://ncaa-api:3000")
+NCAA_SCOREBOARD_PATH = "/scoreboard/basketball-men/d1"
+NCAA_SCHOOLS_INDEX_PATH = "/schools-index"
+NCAA_MATCH_TOLERANCE_HOURS = 6
+
+# Sentinel returned by connectors for a canceled/postponed game, and the
+# self-describing marker surfaced in the Paper Trading UI for human review.
+# Never auto-grade a non-finished game as a loss.
+CANCELED_MARKER = "Canceled/Postponed — manual review"
+
+# Run-scoped caches so a single settlement run makes at most one network call
+# per distinct game-day (cleared at the start of every settlement run).
+_nba_day_cache = {}          # ET date "MM/DD/YYYY" -> leaguegamefinder games | None
+_nba_odds_cache = None       # The Odds API /scores payload (list) | [] on failure
+_ncaa_scoreboard_cache = {}  # (Y, M, D) -> validated games | None
+_ncaa_slug_map = None        # NCAA normalized alias -> slug key (stable across runs)
+
+
+def _reset_settlement_caches():
+    global _nba_day_cache, _nba_odds_cache, _ncaa_scoreboard_cache
+    _nba_day_cache = {}
+    _nba_odds_cache = None
+    _ncaa_scoreboard_cache = {}
+
+
+def _score_source_for_league(league):
+    conf = _league_by_name(league)
+    source = conf.get("score_source") if conf else None
+    if source:
+        return source
+    # Conservative default: NCAA has one connector today; everything else NBA.
+    return "ncaa" if league == "NCAA" else "nba"
+
+
+def _split_match_name(match_name):
+    if not match_name:
+        return "", ""
+    parts = re.split(r"\s+vs\.?\s+", str(match_name).strip(), maxsplit=1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return str(match_name).strip(), ""
+
+
+def _parse_commence_utc(commence_time):
+    """Parse an ISO commence time (may carry a Z suffix) into a UTC-aware datetime."""
+    if not commence_time:
+        return None
     try:
-        # 1. Build the list of dates to query (last N days in Eastern Time)
-        et_tz = pytz.timezone("America/New_York")
-        today_et = datetime.now(et_tz)
-        dates_to_check = [
-            (today_et - timedelta(days=i)).strftime("%m/%d/%Y")
-            for i in range(days_back)
-        ]
+        dt = datetime.fromisoformat(str(commence_time).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=pytz.utc)
+    return dt.astimezone(pytz.utc)
 
-        all_games = []
 
-        for date_str in dates_to_check:
-            print(f"  Querying NBA API for {date_str}...")
-            try:
-                result = leaguegamefinder.LeagueGameFinder(
-                    date_from_nullable=date_str,
-                    date_to_nullable=date_str,
-                    league_id_nullable="00",  # 00 = NBA
-                )
-                api_df = result.get_data_frames()[0]
-            except Exception as e:
-                print(f"  ⚠️ NBA API call failed for {date_str}: {e}")
-                time_module.sleep(1)
+def _et_datetime(commence_time):
+    dt = _parse_commence_utc(commence_time)
+    return dt.astimezone(ET_TZ) if dt else None
+
+
+def _commence_epoch(commence_time):
+    dt = _parse_commence_utc(commence_time)
+    return int(dt.timestamp()) if dt else None
+
+
+def _to_int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+# ------------------------------------------------------------------
+# NCAA score connector (score_source: "ncaa")
+# ------------------------------------------------------------------
+
+def _expand_school_variants(raw):
+    """Derive alias spellings from one school name/slug variant.
+
+    Covers the "Morehead St." <-> "morehead-st" collapse (normalize handles the
+    hyphens/dots) plus common book-spelling drift: "State" <-> "St." and long
+    names that drop a trailing "University"/"College" (e.g. "San Diego State
+    University" -> "San Diego State"). "St. Thomas (MN)" legitimately keeps too
+    many aliases ("State Thomas (MN)") but those are inert unless another school
+    actually resolves to the same key.
+    """
+    raw = str(raw or "").strip()
+    if not raw:
+        return []
+    variants = [raw]
+    words = raw.split()
+    lower_words = [w.lower() for w in words]
+    if "state" in lower_words:
+        variants.append(re.sub(r"(?i)\bstate\b", "St.", raw))
+    if any(w.lower() in ("st", "st.") for w in words):
+        variants.append(re.sub(r"(?i)\bst\.?\b", "State", raw))
+    stripped = re.sub(r"(?i)\s+(university|college)\s*$", "", raw).strip()
+    if stripped and stripped != raw:
+        variants.append(stripped)
+        if "state" in stripped.lower():
+            variants.append(re.sub(r"(?i)\bstate\b", "St.", stripped))
+    return list(dict.fromkeys(variants))
+
+
+def _school_variants(school, slug):
+    variants = [slug]
+    for key in ("name", "long", "short"):
+        val = school.get(key)
+        if isinstance(val, str) and val.strip() \
+                and normalize_team_name(val) != normalize_team_name(slug):
+            variants.append(val)
+    expanded = []
+    for v in variants:
+        expanded.extend(_expand_school_variants(v))
+    return expanded
+
+
+def _seed_ncaa_aliases(slug_map):
+    if not slug_map:
+        return
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        rows = list(slug_map.items())
+        cursor.executemany(
+            "INSERT OR IGNORE INTO team_aliases (alias, canonical) VALUES (?, ?)", rows
+        )
+        conn.commit()
+        conn.close()
+        print(f"🏷️ Seeded {len(rows)} NCAA slug aliases into team_aliases")
+    except Exception as e:
+        print(f"⚠️ Could not seed NCAA slug aliases into team_aliases: {e}")
+
+
+def _load_ncaa_slug_map():
+    """Build the canonical slug alias map from the NCAA /schools-index feed.
+
+    An alias that would resolve to more than one school slug is dropped (left
+    unresolved) so an ambiguous book spelling can never silently pick a school;
+    the game-side match instead falls back to the raw normalized name.
+    """
+    global _ncaa_slug_map
+    if _ncaa_slug_map is not None:
+        return _ncaa_slug_map
+    _ncaa_slug_map = {}
+    try:
+        resp = requests.get(f"{NCAA_API_BASE}{NCAA_SCHOOLS_INDEX_PATH}", timeout=20)
+        resp.raise_for_status()
+        schools = resp.json()
+        if not isinstance(schools, list):
+            raise ValueError("schools-index expected a list (schema drift)")
+        alias_to_slug = {}
+        for school in schools:
+            if not isinstance(school, dict):
                 continue
-
-            if api_df.empty:
-                print(f"  No games found for {date_str}")
-                time_module.sleep(1)
+            slug = school.get("slug")
+            if not slug:
                 continue
-
-            # 2. Group by GAME_ID to pair home/away teams
-            for game_id, group in api_df.groupby("GAME_ID"):
-                if len(group) != 2:
-                    continue  # Should always be 2 teams, skip if not
-
-                # WL column: 'W' or 'L'
-                # MATCHUP column: 'Team A vs. Team B' (home) or 'Team A @ Team B' (away)
-                home_row = group[group["MATCHUP"].str.contains("vs.")].iloc[0] if not group[group["MATCHUP"].str.contains("vs.")].empty else None
-                away_row = group[group["MATCHUP"].str.contains("@")].iloc[0] if not group[group["MATCHUP"].str.contains("@")].empty else None
-
-                if home_row is None or away_row is None:
+            norm_slug = normalize_team_name(slug)
+            if not norm_slug:
+                continue
+            for alias in _school_variants(school, slug):
+                norm_alias = normalize_team_name(alias)
+                if not norm_alias:
                     continue
-
-                # 3. Format to match The Odds API format that grade_bet() expects
-                all_games.append({
-                    "home_team": str(home_row["TEAM_NAME"]),
-                    "away_team": str(away_row["TEAM_NAME"]),
-                    "completed": True,  # LeagueGameFinder only returns completed games
-                    "scores": [
-                        {"name": str(home_row["TEAM_NAME"]), "score": str(int(home_row["PTS"]))},
-                        {"name": str(away_row["TEAM_NAME"]), "score": str(int(away_row["PTS"]))},
-                    ]
-                })
-
-            time_module.sleep(1)  # Respect NBA API rate limit
-
-        print(f"🏀 NBA API returned {len(all_games)} completed games.")
-        return all_games
-
+                if norm_alias in alias_to_slug:
+                    if alias_to_slug[norm_alias] != norm_slug:
+                        alias_to_slug[norm_alias] = None  # ambiguous -> unresolved
+                else:
+                    alias_to_slug[norm_alias] = norm_slug
+        _ncaa_slug_map = {a: s for a, s in alias_to_slug.items() if s}
+        _seed_ncaa_aliases(_ncaa_slug_map)
     except Exception as e:
-        print(f"❌ NBA API fetch failed entirely: {e}")
-        return []
+        print(f"❌ Failed to load NCAA schools-index from {NCAA_API_BASE}: {e}")
+        _ncaa_slug_map = {}
+    return _ncaa_slug_map
 
 
-def fetch_nba_scores():
-    """
-    Fetches NBA scores for settlement.
+def _resolve_ncaa_team(name):
+    norm = normalize_team_name(name)
+    if not norm:
+        return norm
+    return _ncaa_slug_map.get(norm, norm)
 
-    Strategy:
-    1. Try official NBA API first (free, authoritative, slower)
-    2. Fall back to The Odds API if NBA API fails or returns no data
-    """
-    # 1. Try NBA API first
-    scores = fetch_nba_scores_official(days_back=3)
-    if scores:
-        return scores
 
-    # 2. Fall back to The Odds API
-    print("⚠️ NBA API returned no data. Falling back to Odds API...")
-    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/scores"
-    params = {
-        "apiKey": API_KEY,
-        "daysFrom": 3,
-        "dateFormat": "iso"
-    }
+def _ncaa_validate_scoreboard(payload):
+    """Pin the NCAA scoreboard response contract. Schema drift raises so the
+    caller keeps bets Pending and logs loudly instead of misgrading."""
+    if not isinstance(payload, dict) or "games" not in payload:
+        raise ValueError("scoreboard payload missing 'games' key (schema drift)")
+    games_out = []
+    for element in payload["games"]:
+        if not isinstance(element, dict) or "game" not in element:
+            continue
+        g = element["game"]
+        if not isinstance(g, dict):
+            continue
+        home, away = g.get("home"), g.get("away")
+        home_names = (home or {}).get("names") or {}
+        away_names = (away or {}).get("names") or {}
+        hseo, aseo = home_names.get("seo"), away_names.get("seo")
+        if not hseo or not aseo:
+            raise ValueError("scoreboard game missing home/away names.seo (schema drift)")
+        start_epoch = str(g.get("startTimeEpoch") or "").strip()
+        games_out.append({
+            "home_key": normalize_team_name(hseo),
+            "away_key": normalize_team_name(aseo),
+            "home_score": _to_int((home or {}).get("score")),
+            "away_score": _to_int((away or {}).get("score")),
+            "state": str(g.get("gameState") or ""),
+            "final_message": str(g.get("finalMessage") or ""),
+            "start_epoch": int(start_epoch) if start_epoch.isdigit() else None,
+        })
+    return games_out
+
+
+def _fetch_ncaa_scoreboard(year, month, day):
+    key = (year, month, day)
+    if key in _ncaa_scoreboard_cache:
+        return _ncaa_scoreboard_cache[key]
+    url = f"{NCAA_API_BASE}{NCAA_SCOREBOARD_PATH}/{year}/{month:02d}/{day:02d}"
     try:
-        resp = requests.get(url, params=params)
+        resp = requests.get(url, timeout=20)
         resp.raise_for_status()
-        print("✅ Fallback to Odds API successful.")
-        return resp.json()
+        games = _ncaa_validate_scoreboard(resp.json())
+        _ncaa_scoreboard_cache[key] = games
+        return games
     except Exception as e:
-        print(f"❌ Odds API fallback also failed: {e}")
-        return []
-    """Fetches scores for the last 3 days from The Odds API"""
-    # Note: 'daysFrom' allows us to look back at completed games
-    url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/scores'
-    params = {
-        'apiKey': API_KEY,
-        'daysFrom': 3, # Look back 3 days
-        'dateFormat': 'iso'
-    }
+        print(f"❌ NCAA scoreboard fetch/validation failed ({url}): {e}")
+        _ncaa_scoreboard_cache[key] = None
+        return None
+
+
+def _ncaa_connector(home, away, commence_time):
+    """Return the FINAL score for the one specific NCAA game on the bet's ET
+    day, or None (stay Pending) / CANCELED_MARKER (manual review)."""
+    _load_ncaa_slug_map()
+    et_dt = _et_datetime(commence_time)
+    bet_epoch = _commence_epoch(commence_time)
+    if et_dt is None or bet_epoch is None:
+        print(f"⚠️ NCAA: cannot parse commence_time {commence_time!r} for {home} vs {away}; keeping Pending")
+        return None
+
+    y, m, d = et_dt.year, et_dt.month, et_dt.day
+    games = _fetch_ncaa_scoreboard(y, m, d)
+    if games is None:
+        print(f"⚠️ NCAA: scoreboard unavailable for {y}-{m:02d}-{d:02d}; {home} vs {away} stays Pending")
+        return None
+
+    bet_home_key = _resolve_ncaa_team(home)
+    bet_away_key = _resolve_ncaa_team(away)
+
+    finals = []
+    special_state = None  # first matching canceled/postponed state to surface
+    for g in games:
+        if {g["home_key"], g["away_key"]} != {bet_home_key, bet_away_key}:
+            continue
+        start_epoch = g.get("start_epoch")
+        if start_epoch is not None and abs(start_epoch - bet_epoch) > NCAA_MATCH_TOLERANCE_HOURS * 3600:
+            continue  # outside the ±6h start-time window
+        state = g["state"]
+        if state == "final" and g.get("final_message") == "FINAL":
+            finals.append(g)
+        elif state in ("postponed", "canceled"):
+            special_state = special_state or state
+
+    if len(finals) == 1:
+        g = finals[0]
+        if g["home_key"] == bet_home_key:
+            return {
+                "home_team": home, "away_team": away,
+                "home_score": g["home_score"], "away_score": g["away_score"],
+            }
+        return {
+            "home_team": home, "away_team": away,
+            "home_score": g["away_score"], "away_score": g["home_score"],
+        }
+
+    if len(finals) > 1:
+        print(f"⚠️ NCAA: {len(finals)} finished games match {home} vs {away} on {y}-{m:02d}-{d:02d}; ambiguous, keeping Pending")
+        return None
+    if special_state:
+        print(f"🚨 NCAA: {home} vs {away} on {y}-{m:02d}-{d:02d} is {special_state}; keeping Pending — manual review")
+        return CANCELED_MARKER
+    print(f"🔎 NCAA: no finished game for {home} vs {away} on {y}-{m:02d}-{d:02d}; keeping Pending")
+    return None
+
+
+# ------------------------------------------------------------------
+# NBA score connector (score_source: "nba")
+# ------------------------------------------------------------------
+
+def _nba_games_for_date(date_str):
+    """Completed NBA games for one ET date via leaguegamefinder (cached per run)."""
+    if date_str in _nba_day_cache:
+        return _nba_day_cache[date_str]
+    candidates = []
     try:
-        resp = requests.get(url, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        from nba_api.stats.endpoints import leaguegamefinder
+        result = leaguegamefinder.LeagueGameFinder(
+            date_from_nullable=date_str,
+            date_to_nullable=date_str,
+            league_id_nullable="00",  # NBA
+        )
+        df = result.get_data_frames()[0]
+        for _, group in df.groupby("GAME_ID"):
+            if len(group) != 2:
+                continue
+            home_rows = group[group["MATCHUP"].str.contains("vs.", na=False)]
+            away_rows = group[group["MATCHUP"].str.contains("@", na=False)]
+            if home_rows.empty or away_rows.empty:
+                continue
+            hr = home_rows.iloc[0]
+            ar = away_rows.iloc[0]
+            hs = _to_int(hr.get("PTS"))
+            as_s = _to_int(ar.get("PTS"))
+            if hs is None or as_s is None:
+                continue
+            candidates.append({
+                "home_key": normalize_team_name(str(hr["TEAM_NAME"])),
+                "away_key": normalize_team_name(str(ar["TEAM_NAME"])),
+                "home_score": hs,
+                "away_score": as_s,
+            })
     except Exception as e:
-        print(f"Error fetching scores: {e}")
-        return []
+        print(f"⚠️ NBA leaguegamefinder failed for {date_str}: {e}")
+        _nba_day_cache[date_str] = None
+        return None
+    _nba_day_cache[date_str] = candidates
+    return candidates
 
-def grade_bet(bet_row, scores_data):
+
+def _get_nba_odds_scores():
+    """The Odds API NBA /scores payload, fetched at most once per settlement run."""
+    global _nba_odds_cache
+    if _nba_odds_cache is not None:
+        return _nba_odds_cache
+    try:
+        url = "https://api.the-odds-api.com/v4/sports/basketball_nba/scores"
+        params = {"apiKey": API_KEY, "daysFrom": 3, "dateFormat": "iso"}
+        resp = requests.get(url, params=params, timeout=20)
+        resp.raise_for_status()
+        _nba_odds_cache = resp.json()
+    except Exception as e:
+        print(f"❌ Odds API NBA scores fallback failed: {e}")
+        _nba_odds_cache = []
+    return _nba_odds_cache
+
+
+def _nba_odds_games_for_date(et_date):
+    """Completed Odds API games whose commence_time falls on the bet's ET date."""
+    candidates = []
+    for g in _get_nba_odds_scores():
+        if not g.get("completed"):
+            continue
+        g_dt = _et_datetime(g.get("commence_time"))
+        if g_dt is None or g_dt.strftime("%Y-%m-%d") != et_date:
+            continue
+        home, away = g.get("home_team"), g.get("away_team")
+        scores = g.get("scores") or []
+        hs = aws = None
+        for s in scores:
+            if s.get("name") == home:
+                hs = _to_int(s.get("score"))
+            elif s.get("name") == away:
+                aws = _to_int(s.get("score"))
+        if hs is None or aws is None:
+            continue
+        candidates.append({
+            "home_key": normalize_team_name(home),
+            "away_key": normalize_team_name(away),
+            "home_score": hs,
+            "away_score": aws,
+        })
+    return candidates
+
+
+def _nba_match_one(candidates, home, away):
+    """Return the score dict if exactly one finished game matches the two teams."""
+    if not candidates:
+        return None
+    bh = normalize_team_name(NBA_TEAM_NAME_MAP.get(home, home))
+    ba = normalize_team_name(NBA_TEAM_NAME_MAP.get(away, away))
+    matched = [c for c in candidates if {c["home_key"], c["away_key"]} == {bh, ba}]
+    if len(matched) != 1:
+        if len(matched) > 1:
+            print(f"⚠️ NBA: {len(matched)} finished games match {home} vs {away}; ambiguous, keeping Pending")
+        return None
+    c = matched[0]
+    if c["home_key"] == bh:
+        return {"home_team": home, "away_team": away,
+                "home_score": c["home_score"], "away_score": c["away_score"]}
+    return {"home_team": home, "away_team": away,
+            "home_score": c["away_score"], "away_score": c["home_score"]}
+
+
+def _nba_connector(home, away, commence_time):
+    """Primary leaguegamefinder scoped to the bet's ET date; fall back to The
+    Odds API scores filtered by per-game commence_time date AND completed."""
+    et_dt = _et_datetime(commence_time)
+    if et_dt is None:
+        print(f"⚠️ NBA: cannot parse commence_time {commence_time!r} for {home} vs {away}; keeping Pending")
+        return None
+    date_str = et_dt.strftime("%m/%d/%Y")
+    et_date = et_dt.strftime("%Y-%m-%d")
+
+    games = _nba_games_for_date(date_str)
+    if games is not None:
+        match = _nba_match_one(games, home, away)
+        if match is not None:
+            return match
+
+    odds = _nba_odds_games_for_date(et_date)
+    match = _nba_match_one(odds, home, away)
+    if match is not None:
+        return match
+
+    print(f"🔎 NBA: no matching finished game for {home} vs {away} on {et_date}; keeping Pending")
+    return None
+
+
+# ------------------------------------------------------------------
+# Connector dispatch + grading
+# ------------------------------------------------------------------
+
+def _connector_get_score(score_source, home, away, commence_time):
+    if score_source == "ncaa":
+        return _ncaa_connector(home, away, commence_time)
+    return _nba_connector(home, away, commence_time)  # default / "nba"
+
+
+def grade_bet(bet_row):
     """
-    Returns: (New Status, Score String) or (None, None) if game not found/finished
+    Grade one bet via its league's per-game score connector.
+
+    Returns (status, result_str):
+      (None, None)                     -> no finished/ambiguous game; stays Pending
+      ('Pending', CANCELED_MARKER)     -> canceled/postponed; manual review
+      (<status>, 'Home 100 - 90 Away') -> graded Won/Lost/Void
+
+    The MoneyLine / Spread / Total grading math is unchanged; only the game
+    lookup is date-keyed, final-only and ambiguity-safe (ADR-0003).
     """
-    bet_match_name = bet_row['match_name'] # e.g. "Houston Rockets vs Phoenix Suns"
-    
-    # 1. PREPARE API DATA FOR MATCHING
-    # We construct strings "Home vs Away" for every game in the API response
-    # so we can compare apples to apples.
-    api_games_map = {}
-    for g in scores_data:
-        title = f"{g['home_team']} vs {g['away_team']}"
-        api_games_map[title] = g
+    league = bet_row.get('league') or 'NBA'
+    home_name, away_name = _split_match_name(bet_row.get('match_name', ''))
+    commence_time = bet_row.get('commence_time') or bet_row.get('game_starts_at')
+    if not home_name or not away_name:
+        print(f"⚠️ Cannot parse match_name {bet_row.get('match_name')!r}; keeping Pending")
+        return None, None
 
-    # 2. FUZZY MATCH THE FULL TITLE
-    # This ensures "Rockets vs Suns" doesn't match "Rockets vs Kings"
-    potential_matches = list(api_games_map.keys())
-    best_match_title, score = process.extractOne(bet_match_name, potential_matches)
-    
-    # Use a strict threshold (90) because we expect the names to be very similar
-    # since both data sources ultimately come from The Odds API context.
-    if score < 90: 
-        return None, None 
+    score_source = _score_source_for_league(league)
+    game = _connector_get_score(score_source, home_name, away_name, commence_time)
 
-    game = api_games_map[best_match_title]
-    
-    if not game['completed']: return None, None # Game exists but isn't over
+    if game is CANCELED_MARKER:
+        return 'Pending', CANCELED_MARKER
+    if game is None:
+        return None, None
 
-    # 3. EXTRACT SCORES
-    home_score = 0
-    away_score = 0
-    
-    # Some API providers return scores as a list, others as null if cancelled
-    if not game.get('scores'): return None, None
+    home_score, away_score = game['home_score'], game['away_score']
+    result_str = f"{home_name} {home_score} - {away_score} {away_name}"
 
-    for s in game['scores']:
-        if s['name'] == game['home_team']: home_score = int(s['score'])
-        elif s['name'] == game['away_team']: away_score = int(s['score'])
-
-    result_str = f"{game['home_team']} {home_score} - {away_score} {game['away_team']}"
-
-    # 4. GRADE THE BET
+    # --- unchanged grading math ---
     selection = bet_row['selection']
     market = bet_row['market_type']
     handicap = bet_row['handicap'] or 0.0
-    
+
+    sel_home = normalize_team_name(selection) == normalize_team_name(home_name)
     status = "Pending"
 
-    # --- LOGIC ---
-    
-    # A. MONEYLINE
     if market == 'MoneyLine':
-        if selection == game['home_team']:
+        if sel_home:
             status = "Won" if home_score > away_score else "Lost"
         else:
             status = "Won" if away_score > home_score else "Lost"
 
-    # B. SPREAD
     elif market == 'Spread':
-        # Logic: If selection is Home, we want (HomeScore + Handicap) > AwayScore
-        sel_score = home_score if selection == game['home_team'] else away_score
-        opp_score = away_score if selection == game['home_team'] else home_score
-        
+        sel_score = home_score if sel_home else away_score
+        opp_score = away_score if sel_home else home_score
         final_score_adjusted = sel_score + handicap
-        
-        if final_score_adjusted > opp_score: status = "Won"
-        elif final_score_adjusted < opp_score: status = "Lost"
-        else: status = "Void" # Push
+        if final_score_adjusted > opp_score:
+            status = "Won"
+        elif final_score_adjusted < opp_score:
+            status = "Lost"
+        else:
+            status = "Void"
 
-    # C. TOTALS
     elif market == 'Total':
         total_points = home_score + away_score
         if "Over" in selection:
             status = "Won" if total_points > handicap else "Lost"
         elif "Under" in selection:
             status = "Won" if total_points < handicap else "Lost"
-        
-        if total_points == handicap: status = "Void"
+        if total_points == handicap:
+            status = "Void"
 
     return status, result_str
+
+
 
 # To run: uvicorn main:app --reload
