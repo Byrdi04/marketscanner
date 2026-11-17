@@ -2393,6 +2393,7 @@ NCAA_API_BASE = os.getenv("NCAA_API_BASE", "http://ncaa-api:3000")
 NCAA_SCOREBOARD_PATH = "/scoreboard/basketball-men/d1"
 NCAA_SCHOOLS_INDEX_PATH = "/schools-index"
 NCAA_MATCH_TOLERANCE_HOURS = 6
+NCAA_SCOREBOARD_SEED_DAYS = 14  # recent day-window whose short/seo names seed the slug map
 
 # Sentinel returned by connectors for a canceled/postponed game, and the
 # self-describing marker surfaced in the Paper Trading UI for human review.
@@ -2405,6 +2406,8 @@ _nba_day_cache = {}          # ET date "MM/DD/YYYY" -> leaguegamefinder games | 
 _nba_odds_cache = None       # The Odds API /scores payload (list) | [] on failure
 _ncaa_scoreboard_cache = {}  # (Y, M, D) -> validated games | None
 _ncaa_slug_map = None        # NCAA normalized alias -> slug key (stable across runs)
+_slug_reload_after = 0.0     # epoch after which an empty/failed slug map may be reloaded
+_SLUG_RETRY_SECONDS = 120.0  # backoff before retrying a failed schools-index load
 
 
 def _reset_settlement_caches():
@@ -2510,8 +2513,11 @@ def _school_variants(school, slug):
 def _seed_ncaa_aliases(slug_map):
     if not slug_map:
         return
+    # busy_timeout so a concurrent settlement run holding the write lock doesn't
+    # drop the (non-critical, persisted mirror of) alias seeding.
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = sqlite3.connect(DB_NAME, timeout=10)
+        conn.execute("PRAGMA busy_timeout=10000")
         cursor = conn.cursor()
         rows = list(slug_map.items())
         cursor.executemany(
@@ -2524,52 +2530,119 @@ def _seed_ncaa_aliases(slug_map):
         print(f"⚠️ Could not seed NCAA slug aliases into team_aliases: {e}")
 
 
-def _load_ncaa_slug_map():
-    """Build the canonical slug alias map from the NCAA /schools-index feed.
+def _ncaa_map_key(name):
+    """Normalize a school spelling into the NCAA alias-map key space.
 
-    An alias that would resolve to more than one school slug is dropped (left
-    unresolved) so an ambiguous book spelling can never silently pick a school;
-    the game-side match instead falls back to the raw normalized name.
+    Collapses apostrophes/parentheses/hyphens/dots to spaces so a book spelling
+    like 'Saint Marys CA' and the feed's own 'Saint-Mary's (CA)' collide onto
+    the same key, while staying consistent with normalize_team_name(seo) used
+    for the board side of a match.
     """
-    global _ncaa_slug_map
+    n = str(name or "").lower()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", n).split())
+
+
+def _load_ncaa_slug_map():
+    """Build the canonical slug alias map from NCAA team-name data.
+
+    Sources, in order:
+      - /schools-index: slug + name/long/short variants (expanded St <-> State,
+        University/College stripped).
+      - Recent /scoreboard basketball games' own names.short and names.seo, so
+        the alias vocabulary matches exactly what the matcher compares against
+        (book spellings like 'Arkansas Pine Bluff' or 'Saint Marys CA').
+
+    An alias resolving to more than one school slug is dropped (left unresolved)
+    so an ambiguous book spelling can never silently pick a school; the game-side
+    match then falls back to the raw normalized name (strict equality still).
+
+    A failed/empty load is not cached forever: it is retried after a short
+    backoff, so a transient ncaa-api outage at startup doesn't permanently leave
+    the map broken (which previously stranded otherwise-matchable bets as
+    Pending).
+    """
+    global _ncaa_slug_map, _slug_reload_after
     if _ncaa_slug_map is not None:
         return _ncaa_slug_map
-    _ncaa_slug_map = {}
+    now = time.time()
+    if _slug_reload_after and now < _slug_reload_after:
+        return {}  # a recent attempt failed; fail fast rather than hammer the feed
+
+    alias_to_slug = {}
+
+    def _add(alias, canon):
+        key = _ncaa_map_key(alias)
+        if not key:
+            return
+        if key in alias_to_slug and alias_to_slug[key] != canon:
+            alias_to_slug[key] = None  # ambiguous -> unresolved
+        else:
+            alias_to_slug.setdefault(key, canon)
+
     try:
         resp = requests.get(f"{NCAA_API_BASE}{NCAA_SCHOOLS_INDEX_PATH}", timeout=20)
         resp.raise_for_status()
         schools = resp.json()
         if not isinstance(schools, list):
             raise ValueError("schools-index expected a list (schema drift)")
-        alias_to_slug = {}
         for school in schools:
             if not isinstance(school, dict):
                 continue
             slug = school.get("slug")
             if not slug:
                 continue
-            norm_slug = normalize_team_name(slug)
-            if not norm_slug:
+            canon = _ncaa_map_key(slug)
+            if not canon:
                 continue
             for alias in _school_variants(school, slug):
-                norm_alias = normalize_team_name(alias)
-                if not norm_alias:
+                _add(alias, canon)
+
+        # Learn the feed's own short-name spellings from recent scoreboards.
+        # Isolated so a seeding hiccup can't discard the schools-index map.
+        try:
+            et_now = datetime.now(ET_TZ)
+            for i in range(NCAA_SCOREBOARD_SEED_DAYS):
+                day = et_now - timedelta(days=i)
+                url = (f"{NCAA_API_BASE}{NCAA_SCOREBOARD_PATH}/"
+                       f"{day.year}/{day.month:02d}/{day.day:02d}")
+                try:
+                    resp = requests.get(url, timeout=20)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                except Exception:
                     continue
-                if norm_alias in alias_to_slug:
-                    if alias_to_slug[norm_alias] != norm_slug:
-                        alias_to_slug[norm_alias] = None  # ambiguous -> unresolved
-                else:
-                    alias_to_slug[norm_alias] = norm_slug
+                for element in payload.get("games", []):
+                    game = (element or {}).get("game")
+                    if not isinstance(game, dict):
+                        continue
+                    for side in ("home", "away"):
+                        names = ((game.get(side) or {}).get("names") or {})
+                        seo = names.get("seo")
+                        if not seo:
+                            continue
+                        canon = _ncaa_map_key(seo)
+                        if not canon:
+                            continue
+                        _add(seo, canon)  # seo itself (identity)
+                        short = names.get("short")
+                        if short:
+                            for alias in _expand_school_variants(short):
+                                _add(alias, canon)
+        except Exception as e:
+            print(f"⚠️ NCAA scoreboard alias seeding skipped: {e}")
+
         _ncaa_slug_map = {a: s for a, s in alias_to_slug.items() if s}
         _seed_ncaa_aliases(_ncaa_slug_map)
     except Exception as e:
         print(f"❌ Failed to load NCAA schools-index from {NCAA_API_BASE}: {e}")
-        _ncaa_slug_map = {}
+        _ncaa_slug_map = None
+        _slug_reload_after = now + _SLUG_RETRY_SECONDS
+        return {}
     return _ncaa_slug_map
 
 
 def _resolve_ncaa_team(name):
-    norm = normalize_team_name(name)
+    norm = _ncaa_map_key(name)
     if not norm:
         return norm
     return _ncaa_slug_map.get(norm, norm)
