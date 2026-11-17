@@ -2679,21 +2679,27 @@ def _ncaa_validate_scoreboard(payload):
     return games_out
 
 
-def _fetch_ncaa_scoreboard(year, month, day):
+def _fetch_ncaa_scoreboard(year, month, day, _retries=3):
     key = (year, month, day)
     if key in _ncaa_scoreboard_cache:
         return _ncaa_scoreboard_cache[key]
     url = f"{NCAA_API_BASE}{NCAA_SCOREBOARD_PATH}/{year}/{month:02d}/{day:02d}"
-    try:
-        resp = requests.get(url, timeout=20)
-        resp.raise_for_status()
-        games = _ncaa_validate_scoreboard(resp.json())
-        _ncaa_scoreboard_cache[key] = games
-        return games
-    except Exception as e:
-        print(f"❌ NCAA scoreboard fetch/validation failed ({url}): {e}")
-        _ncaa_scoreboard_cache[key] = None
-        return None
+    for attempt in range(_retries):
+        try:
+            resp = requests.get(url, timeout=20)
+            resp.raise_for_status()
+            games = _ncaa_validate_scoreboard(resp.json())
+            _ncaa_scoreboard_cache[key] = games
+            return games
+        except Exception as e:
+            if attempt < _retries - 1:
+                time.sleep(2)  # transient blip; retry before stranding the whole day
+            else:
+                print(f"❌ NCAA scoreboard fetch/validation failed ({url}): {e}")
+    # Not cached on failure: a later bet for this day in the same run, or the
+    # next run, retries — otherwise one transient failure orphans an entire
+    # game-day's bets to Pending for the rest of the run.
+    return None
 
 
 def _ncaa_connector(home, away, commence_time):
