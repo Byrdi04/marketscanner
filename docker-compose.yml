@@ -34,8 +34,9 @@ services:
 
   # --- Self-hosted NCAA Scores API (settlement source; ADR-0003) ---
   # henrygd/ncaa-api mirrors ncaa.com's internal feed. Backend reaches it by
-  # service DNS on market-net. Published to the loopback only, so it is never
-  # publicly reachable and does NOT join proxy-net.
+  # service DNS on market-net (container port 3000 unchanged). Published to the
+  # loopback only (host port 13010; 3000 is already owned by another service),
+  # so it is never publicly reachable and does NOT join proxy-net.
   ncaa-api:
     image: 'henrygd/ncaa-api'
     container_name: ncaa-api
@@ -43,7 +44,7 @@ services:
     networks:
       - market-net
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:13010:3000'
 
 networks:
   market-net:

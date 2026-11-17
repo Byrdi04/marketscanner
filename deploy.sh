@@ -29,6 +29,6 @@ check() {
 
 check "frontend http://odds.lan/" "http://odds.lan/"
 check "backend http://odds.lan/api/health" "http://odds.lan/api/health"
-check "ncaa-api loopback http://127.0.0.1:3000/scoreboard/basketball-men/d1" "http://127.0.0.1:3000/scoreboard/basketball-men/d1"
+check "ncaa-api loopback http://127.0.0.1:13010/scoreboard/basketball-men/d1" "http://127.0.0.1:13010/scoreboard/basketball-men/d1"
 
 echo "==> Deploy complete: production stack is up and smoke tests passed."
