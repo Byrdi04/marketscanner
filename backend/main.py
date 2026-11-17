@@ -2649,8 +2649,14 @@ def _resolve_ncaa_team(name):
 
 
 def _ncaa_validate_scoreboard(payload):
-    """Pin the NCAA scoreboard response contract. Schema drift raises so the
-    caller keeps bets Pending and logs loudly instead of misgrading."""
+    """Flatten the NCAA scoreboard response into the connector's game records.
+
+    A payload that isn't a dict or lacks a 'games' key is treated as schema
+    drift (raise so the caller keeps bets Pending and logs loudly). A single
+    malformed game *within* an otherwise-valid payload is skipped rather than
+    rejecting the whole day — otherwise one bad entry strands every bet on that
+    game-day as Pending.
+    """
     if not isinstance(payload, dict) or "games" not in payload:
         raise ValueError("scoreboard payload missing 'games' key (schema drift)")
     games_out = []
@@ -2665,7 +2671,7 @@ def _ncaa_validate_scoreboard(payload):
         away_names = (away or {}).get("names") or {}
         hseo, aseo = home_names.get("seo"), away_names.get("seo")
         if not hseo or not aseo:
-            raise ValueError("scoreboard game missing home/away names.seo (schema drift)")
+            continue  # skip malformed game; don't blank the whole day
         start_epoch = str(g.get("startTimeEpoch") or "").strip()
         games_out.append({
             "home_key": normalize_team_name(hseo),
@@ -2696,9 +2702,9 @@ def _fetch_ncaa_scoreboard(year, month, day, _retries=3):
                 time.sleep(2)  # transient blip; retry before stranding the whole day
             else:
                 print(f"❌ NCAA scoreboard fetch/validation failed ({url}): {e}")
-    # Not cached on failure: a later bet for this day in the same run, or the
-    # next run, retries — otherwise one transient failure orphans an entire
-    # game-day's bets to Pending for the rest of the run.
+    # Cache the failure for the rest of this run so a genuinely-unavailable day
+    # isn't hammered per bet; the next run (fresh caches) retries it.
+    _ncaa_scoreboard_cache[key] = None
     return None
 
 
