@@ -862,24 +862,65 @@ def _pinnapi_num0_to_markets(event, num_0, allowed_markets):
             markets_out.append({"key": "h2h", "outcomes": outcomes})
 
     if "spread" in allowed_markets and num_0.get("spreads"):
-        line = _pick_primary_line(num_0["spreads"])
-        if line and line.get("home") and line.get("away"):
-            hdp = float(line.get("hdp", 0.0))
-            markets_out.append({"key": "spreads", "outcomes": [
-                {"name": resolve_team_name(home), "point": hdp, "price": float(line["home"])},
-                {"name": resolve_team_name(away), "point": -hdp, "price": float(line["away"])},
-            ]})
+        lines, primary = _spread_lines(num_0["spreads"])
+        if lines:
+            market = {"key": "spreads", "lines": lines}
+            # Keep a 2-outcome primary-line view so older single-line consumers
+            # (legacy snapshots, NBA odds-api path) still work unchanged.
+            if primary:
+                market["outcomes"] = [
+                    {"name": resolve_team_name(home), "point": primary["point"],
+                     "price": primary["home"]},
+                    {"name": resolve_team_name(away), "point": -primary["point"],
+                     "price": primary["away"]},
+                ]
+            markets_out.append(market)
 
     if "total" in allowed_markets and num_0.get("totals"):
-        line = _pick_primary_line(num_0["totals"])
-        if line and line.get("over") and line.get("under"):
-            pts = float(line.get("points", 0.0))
-            markets_out.append({"key": "totals", "outcomes": [
-                {"name": "Over", "point": pts, "price": float(line["over"])},
-                {"name": "Under", "point": pts, "price": float(line["under"])},
-            ]})
+        lines, primary = _total_lines(num_0["totals"])
+        if lines:
+            market = {"key": "totals", "lines": lines}
+            if primary:
+                market["outcomes"] = [
+                    {"name": "Over", "point": primary["point"], "price": primary["over"]},
+                    {"name": "Under", "point": primary["point"], "price": primary["under"]},
+                ]
+            markets_out.append(market)
 
     return markets_out
+
+
+def _spread_lines(spreads):
+    """Retain the full Pinnacle spread curve, keyed by the home handicap.
+
+    Each pinnapi spread entry is dict keyed by line with {hdp, home, away, max}.
+    We keep every offered line (not just the primary) so a bet at any handicap
+    can be priced from a line that actually spans it. Returns (lines, primary).
+    """
+    lines = {}
+    primary = None
+    for key, line in (spreads or {}).items():
+        if not line or not line.get("home") or not line.get("away"):
+            continue
+        hdp = float(line.get("hdp", 0.0))
+        lines[repr(hdp)] = {"point": hdp, "home": float(line["home"]), "away": float(line["away"])}
+        if primary is None or float(line.get("max", 0) or 0) > float(primary.get("max", 0) or 0):
+            primary = lines[repr(hdp)]
+    return lines, primary
+
+
+def _total_lines(totals):
+    """Same as _spread_lines but for the totals curve, keyed by total points."""
+    lines = {}
+    primary = None
+    for key, line in (totals or {}).items():
+        if not line or not line.get("over") or not line.get("under"):
+            continue
+        pts = float(line.get("points", 0.0))
+        lines[repr(pts)] = {"point": pts, "over": float(line["over"]), "under": float(line["under"])}
+        if primary is None or float(line.get("max", 0) or 0) > float(primary.get("max", 0) or 0):
+            primary = lines[repr(pts)]
+    return lines, primary
 def update_clv_for_placed_bets(pinnacle_events):
     """
     Loops through pending bets in DB. If the game is found in the fresh
@@ -990,16 +1031,30 @@ def find_clv_for_paper_bet(bet_row):
     p_target_market = next((m for m in p_event['markets'] if m['key'] == p_market_key), None)
     if not p_target_market: return None
 
-    # Calculate Fair Odds
-    fair_probs = calculate_fair_probability(p_target_market['outcomes'])
-
     # Fuzzy match selection (alias-resolve team names on multi-team leagues)
     selection = resolve_team_name(bet_row['selection']) if strategy == "full_string" else bet_row['selection']
-    p_selection, sel_score = process.extractOne(selection, list(fair_probs.keys()))
-    if sel_score < 85: return None
 
-    # Return the Fair Odds (CLV)
-    fair_prob = fair_probs[p_selection]
+    # Price CLV at the bet's OWN handicap / total, using Pinnacle's closest
+    # snapshot so EV and CLV are measured on the same line (not an unrelated
+    # single "primary" line).
+    d_line = bet_row.get('handicap')
+    market_type = bet_row.get('market_type')
+    fair_prob = None
+
+    if market_type == 'Spread' and d_line is not None:
+        is_home = bool(p_event.get('home_team') and
+                       selection == resolve_team_name(p_event['home_team']))
+        fair_prob = fair_prob_at_handicap(p_target_market, float(d_line), is_home)
+    elif market_type == 'Total' and d_line is not None:
+        fair_prob = fair_prob_at_total(p_target_market, float(d_line), "Over" in bet_row['selection'])
+    elif market_type == 'MoneyLine':
+        fair_probs = calculate_fair_probability(p_target_market['outcomes'])
+        p_selection, sel_score = process.extractOne(selection, list(fair_probs.keys()))
+        if sel_score >= 85:
+            fair_prob = fair_probs[p_selection]
+
+    if fair_prob is None or fair_prob <= 0:
+        return None
     return round(1 / fair_prob, 2)
 
 # ---------------------------------------------------------
@@ -1129,6 +1184,110 @@ def calculate_fair_probability(pinnacle_outcomes):
     # Normalize to remove vig
     return {o['name']: (1/o['price']) / total_implied for o in pinnacle_outcomes if o['price'] > 1}
 
+
+def _de_vig(prices):
+    """De-vig a two-outcome market given [price_home_or_over, price_away_or_under].
+    Returns [prob_side0, prob_side1] summing to 1."""
+    inv = [1.0 / p for p in prices if p and p > 1]
+    if len(inv) < 2:
+        return None
+    tot = sum(inv)
+    return [i / tot for i in inv]
+
+
+def _interp_fair_prob(curve, target):
+    """Interpolate fair probability at `target` across a sorted `curve` of
+    (point, prob) samples. Exact match when a sample lands on target; linear
+    interpolation between bracketing samples; returns None outside the range
+    (we never fabricate an edge beyond what Pinnacle actually offers)."""
+    if not curve:
+        return None
+    curve = sorted(curve, key=lambda x: x[0])
+    pts = [c[0] for c in curve]
+    if target < pts[0] or target > pts[-1]:
+        return None
+    for i in range(len(curve)):
+        if abs(curve[i][0] - target) < 1e-9:
+            return curve[i][1]
+    for i in range(len(curve) - 1):
+        p0, p1 = curve[i][0], curve[i + 1][0]
+        if p0 <= target <= p1:
+            w = (target - p0) / (p1 - p0)
+            return curve[i][1] + w * (curve[i + 1][1] - curve[i][1])
+    return None
+
+
+def fair_prob_at_handicap(market, handicap, is_home):
+    """Fair probability that the selected team covers `handicap` (its own signed
+    line) using Pinnacle's full line curve. `market` carries `lines` keyed by the
+    home handicap: {point: {point, home, away}}. Interpolates across offered
+    points. Falls back to the primary line's de-vigged price when the new
+    multi-line shape is absent (legacy snapshots / NBA odds-api path)."""
+    lines = market.get('lines') if isinstance(market, dict) else None
+    if lines:
+        curve = []
+        for ent in lines.values():
+            p = ent['point']
+            dev = _de_vig([ent['home'], ent['away']])
+            if dev is None:
+                continue
+            # side0 = home. If betting the away side, use its cover prob.
+            home_prob = dev[0]
+            away_hdp = -p
+            if is_home:
+                curve.append((p, home_prob))
+            else:
+                curve.append((away_hdp, 1.0 - home_prob))
+        return _interp_fair_prob(curve, handicap)
+
+    # Legacy: single primary line only (old snapshots / NBA odds-api path).
+    # Price only when the bet's handicap equals the one Pinnacle actually
+    # offered; a single point cannot support interpolation to another line.
+    outcomes = market.get('outcomes') or []
+    if len(outcomes) < 2:
+        return None
+    side_point = None
+    for o in outcomes:
+        if o.get('point') is None:
+            return None
+        # Match the outcome to the side being priced (home/away by name when
+        # the market marks sides; otherwise NBA odds-api orders home first).
+        if is_home and str(o['name']).lower() == str(market.get('home_team', '')).lower():
+            side_point = float(o['point'])
+        elif not is_home and str(o['name']).lower() == str(market.get('away_team', '')).lower():
+            side_point = float(o['point'])
+    if side_point is None:
+        side_point = float(outcomes[0]['point']) if is_home else float(outcomes[1]['point'])
+    if abs(side_point - handicap) > 0.1:
+        return None
+    dev = _de_vig([o['price'] for o in outcomes])
+    return dev[0] if is_home else dev[1]
+
+
+def fair_prob_at_total(market, total, is_over):
+    """Fair probability of covering `total` (Over or Under) via the total curve."""
+    lines = market.get('lines') if isinstance(market, dict) else None
+    if lines:
+        curve = []
+        for ent in lines.values():
+            t = ent['point']
+            dev = _de_vig([ent['over'], ent['under']])
+            if dev is None:
+                continue
+            curve.append((t, dev[0] if is_over else dev[1]))  # side0 = over
+        return _interp_fair_prob(curve, total)
+
+    # Legacy: single primary line only; require the bet's total to equal the
+    # stored line point before pricing (we cannot interpolate a single line).
+    outcomes = market.get('outcomes') or []
+    stored_total = next((o.get('point') for o in outcomes if o.get('point') is not None), None)
+    if stored_total is None or abs(float(stored_total) - total) > 0.1:
+        return None
+    dev = _de_vig([o['price'] for o in outcomes])
+    if dev is None:
+        return None
+    return dev[0] if is_over else dev[1]
+
 def run_analysis(danske_events, pinnacle_events, min_match_score=80):
     results = []
     league = danske_events[0].get('league', 'NBA') if danske_events else 'NBA'
@@ -1161,38 +1320,25 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
             p_selection, name_score = process.extractOne(match_selection, list(fair_probs.keys()))
             if name_score < min_match_score: continue
 
-            # Line Matching Logic
             d_line = d_market.get('handicap_line')
-            prob_adjustment = 0.0
-            is_valid = True
-
-            if d_market['type'] in ['Spread', 'Total']:
-                p_outcome = next((o for o in p_target_market['outcomes'] if o['name'] == p_selection), None)
-                p_line = p_outcome.get('point') if p_outcome else None
-
-                if d_line is None or p_line is None:
-                    is_valid = False
-                else:
-                    diff = float(d_line) - float(p_line)
-                    if abs(diff) < 0.1:
-                        pass # Exact match
-                    elif abs(diff) <= 1.6:
-                        # Adjust fair prob based on line difference
-                        factor = 0.035 if d_market['type'] == 'Spread' else 0.02
-                        direction = -1 if (d_market['type'] == 'Total' and "Over" in d_selection) else 1
-                        if d_market['type'] == 'Spread': direction = 1 
-                        
-                        # Simplified logic for this example:
-                        # If we are getting extra points (Spread), it's good.
-                        # If we are getting lower total on Over, it's good.
-                        prob_adjustment = 0 # keeping simple for phase 1
-                    else:
-                        is_valid = False # Line too far off
-            
-            if not is_valid: continue
-
             d_odds = d_market['odds']
-            fair_prob = fair_probs[p_selection] + prob_adjustment
+            fair_prob = None
+
+            if d_market['type'] == 'Spread' and d_line is not None:
+                # Price this exact handicap from Pinnacle's full line curve.
+                is_home = bool(p_event.get('home_team') and
+                               match_selection == resolve_team_name(p_event['home_team']))
+                fair_prob = fair_prob_at_handicap(p_target_market, float(d_line), is_home)
+            elif d_market['type'] == 'Total' and d_line is not None:
+                is_over = "Over" in d_selection
+                fair_prob = fair_prob_at_total(p_target_market, float(d_line), is_over)
+            elif d_market['type'] == 'MoneyLine':
+                # Money line has no handicap; de-vigged fair prob directly.
+                fair_prob = fair_probs.get(p_selection)
+
+            if fair_prob is None:
+                continue
+
             ev_percent = (d_odds * fair_prob) - 1
 
             if ev_percent > -0.05: # Return anything better than -5% EV
