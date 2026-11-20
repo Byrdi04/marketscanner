@@ -878,10 +878,10 @@ def _pinnapi_fetch_raw(league):
     sport_id=3 already contains NBA + NCAA, so ONE HTTP request serves every
     pinnapi league; the daily quota counter increments once per request.
 
-    Returns (payload, fresh): fresh=True when the payload is newly pulled (this
-    call, or a same-window pull by another league still inside CACHE_DURATION);
-    fresh=False when served stale from the daily soft-cap (logged, no pull).
-    Returns (None, False) when the pull failed or PINNAPI_KEY is unset.
+    Returns (payload, pulled, raw_ts):
+      payload  — the raw JSON payload, or None when the pull failed / key unset
+      pulled   — True when a new HTTP request was made by this call
+      raw_ts   — epoch when the payload was pulled (identity for snapshot gating)
     """
     global pinnapi_raw_cache
     now = time.time()
@@ -890,11 +890,11 @@ def _pinnapi_fetch_raw(league):
     # heartbeat) serves every league without a second HTTP request.
     if pinnapi_raw_cache["data"] is not None and \
             (now - pinnapi_raw_cache["last_updated"] < CACHE_DURATION):
-        return pinnapi_raw_cache["data"], True
+        return pinnapi_raw_cache["data"], False, pinnapi_raw_cache["last_updated"]
 
     if not PINNAPI_KEY:
         print("⚠️ PINNAPI_KEY not set; skipping pinnapi fetch.")
-        return None, False
+        return None, False, 0
 
     # Daily soft-cap: beyond 85 pulls/day serve cached lines (logged) instead
     # of pulling — a widened window or extra force-scans degrade here by design,
@@ -902,7 +902,7 @@ def _pinnapi_fetch_raw(league):
     if _pinnapi_quota_count() >= PINNAPI_SOFT_CAP:
         print(f"🛑 pinnapi soft-cap reached ({_pinnapi_quota_count()}/day): "
               f"serving cached lines instead of a new pull.")
-        return pinnapi_raw_cache["data"], False
+        return pinnapi_raw_cache["data"], False, pinnapi_raw_cache["last_updated"]
 
     pconf = league["pinnacle"]
     url = f"{PINNAPI_BASE}/kit/v1/markets"
@@ -917,7 +917,7 @@ def _pinnapi_fetch_raw(league):
         payload = resp.json()
     except Exception as e:
         print(f"❌ Error fetching pinnapi: {e}")
-        return None, False
+        return None, False, 0
 
     _capture_pinnapi_quota_headers(resp.headers)
     prev = _pinnapi_quota_count()
@@ -925,12 +925,14 @@ def _pinnapi_fetch_raw(league):
     if prev < PINNAPI_WARN_THRESHOLD <= count:
         _warn_pinnapi_quota(count)
     pinnapi_raw_cache = {"last_updated": now, "data": payload}
-    return payload, True
+    return payload, True, now
 
 
 def fetch_pinnapi_cached(league, require_fresh=True):
     """Fetch prematch markets for a league from pinnapi and normalize to the
-    The Odds API event shape. One fresh pull saves a league-stamped snapshot.
+    The Odds API event shape. Every new raw payload saves a league-stamped
+    snapshot (gated on the shared raw payload's timestamp, so NBA and NCAA both
+    get 15-min CLV granularity from the single per-heartbeat pull).
 
     Failure split by betting league (ADR-0004): a fresh-fetch failure on a
     real-bet league (notify=True) ABORTS the scan — returns empty and logs
@@ -939,14 +941,13 @@ def fetch_pinnapi_cached(league, require_fresh=True):
     league (the fail-safe, logged)."""
     global pinnapi_cache
     cached = pinnapi_cache.get(league["name"])
-    current_time = time.time()
 
+    # Non-refresh callers (e.g. /api/opportunities?refresh=false) get the
+    # in-memory parsed lines without any pull.
     if not require_fresh and cached and cached["data"]:
         return cached["data"]
-    if cached and (current_time - cached["last_updated"] < CACHE_DURATION):
-        return cached["data"]
 
-    raw, fresh = _pinnapi_fetch_raw(league)
+    raw, pulled, raw_ts = _pinnapi_fetch_raw(league)
     if raw is None:
         if league.get("notify", True):
             print(f"🚨 {league['name']} (real-bet league): fresh pinnapi pull "
@@ -955,17 +956,16 @@ def fetch_pinnapi_cached(league, require_fresh=True):
         print(f"⚠️ {league['name']}: pinnapi pull failed; serving stale fallback.")
         return cached["data"] if cached else []
 
+    # Same payload this league already parsed (back-to-back call inside the
+    # fresh window, or a soft-cap stale serve): reuse the parse, no new
+    # snapshot.
+    if cached and cached.get("raw_ts") == raw_ts:
+        return cached["data"]
+
     clean_data = parse_pinnapi_data(raw, league)
-    if fresh:
-        if clean_data:
-            save_snapshot_to_db(clean_data, league["name"])
-        pinnapi_cache[league["name"]] = {
-            "last_updated": current_time, "data": clean_data,
-        }
-    elif not cached:
-        # Cold start under the soft-cap: surface the stale lines but keep the
-        # cache stale so every heartbeat re-logs the degradation.
-        pinnapi_cache[league["name"]] = {"last_updated": 0, "data": clean_data}
+    if clean_data:
+        save_snapshot_to_db(clean_data, league["name"])
+    pinnapi_cache[league["name"]] = {"raw_ts": raw_ts, "data": clean_data}
     return clean_data
 
 
@@ -975,11 +975,11 @@ def _probe_pinnapi_at_startup():
     counter), and log the expected daily pull budget from the live window.
     Non-fatal: a failed probe just leaves the cache cold."""
     league = _league_by_name("NBA") or LEAGUES[0]
-    raw, fresh = _pinnapi_fetch_raw(league)
+    raw, pulled, _ = _pinnapi_fetch_raw(league)
     print(f"📊 pinnapi daily budget projection (live active-hours window): "
           f"≈ {_pinnapi_daily_budget()} pulls/day (soft-cap {PINNAPI_SOFT_CAP}, "
           f"ceiling ~{PINNAPI_DAILY_CEILING}).")
-    if fresh and isinstance(raw, dict):
+    if pulled and isinstance(raw, dict):
         print(f"✅ pinnapi startup probe: fresh pull ({len(raw.get('events') or [])} events).")
     else:
         print("ℹ️ pinnapi startup probe: no fresh pull yet (heartbeat will retry).")
