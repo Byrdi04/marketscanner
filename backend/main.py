@@ -117,7 +117,9 @@ app.add_middleware(
 )
 
 # CACHING SETTINGS
-CACHE_DURATION = 600  # Seconds (10 minutes) to keep Pinnacle data
+# 900s = one 15-min heartbeat: a pull is never re-triggered by back-to-back
+# scans that land inside the fresh window (ADR-0004).
+CACHE_DURATION = 900  # Seconds (15 minutes) to keep Pinnacle data
 pinnacle_cache = {
     "last_updated": 0,
     "data": []
@@ -146,9 +148,14 @@ LEAGUES = [
             "exclusions": [],
         },
         "pinnacle": {
-            "provider": "the_odds_api", # legacy feed, kept for continuity
-            "sport": "basketball_nba",
-            "markets": ["spreads"],
+            "provider": "pinnapi",      # replacement sharp-odds feed
+            "sport_id": 3,              # basketball (includes NBA + NCAA)
+            "event_type": "prematch",
+            # pinnapi does not enumerate league labels; tune this allowlist
+            # from the one-time distinct-league_name logger output (NBA is a
+            # subset of sport_id=3 alongside NCAA).
+            "league_name_allowlist": ["NBA"],
+            "markets": ["money_line", "spread", "total"],
         },
         "match_strategy": "home_token",
         "score_source": "nba",
@@ -211,8 +218,12 @@ def perform_clv_snapshot():
     """
     print(f"⏰ CLV SNIPER FIRED: Fetching fresh odds to capture CLV...")
     
-    # 1. Force Fetch (Spend 1 Credit)
-    pinnacle_data = fetch_pinnacle_cached(require_fresh=True)
+    # 1. Force Fetch (Spend 1 Credit) — routed through the bet's league provider
+    # (NBA -> pinnapi, ADR-0004) so closing lines come from the same sharp feed
+    # bets are priced from. This is the only path that captures overnight
+    # closing lines outside the active-hours window.
+    nba_league = _league_by_name("NBA") or LEAGUES[0]
+    pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=True)
     
     # 2. Update Database
     update_clv_for_placed_bets(pinnacle_data)
@@ -736,12 +747,33 @@ def parse_pinnacle_data(api_response):
     return clean_data
 
 # ---------------------------------------------------------
-# PINNAPI FEED (replacement sharp-odds source; used for NCAA)
+# PINNAPI FEED (replacement sharp-odds source; NBA + NCAA, ADR-0004)
 # ---------------------------------------------------------
 PINNAPI_BASE = "https://pinnapi.com"
 
-# Per-league in-memory cache for pinnapi pulls (avoids burn on quota).
+# Per-league in-memory cache for parsed pinnapi pulls (avoids burn on quota).
 pinnapi_cache = {}
+
+# Shared raw-response cache: sport_id=3 already returns NBA + NCAA in one
+# payload, so a SINGLE HTTP request per heartbeat serves every pinnapi league
+# (ADR-0004 — NBA rides along at zero extra requests). Both configured leagues
+# share the same sport_id/event_type, so the raw cache must not be per-league.
+pinnapi_raw_cache = {"last_updated": 0, "data": None}
+
+# Quota instrumentation + guard (ADR-0004): a persisted daily counter in the
+# notification_config KV store. Warn (ntfy) at 80; soft-cap (serve cache,
+# logged) at 85. The 85 cap is the fail-safe: a widened active-hours window or
+# extra force-scans degrade to cached lines, never onto pinnapi's 403 wall.
+PINNAPI_WARN_THRESHOLD = 80
+PINNAPI_SOFT_CAP = 85
+PINNAPI_DAILY_CEILING = 100  # pinnapi free tier (~100 REST/day)
+PINNAPI_CADENCE_MINUTES = 15
+_PINNAPI_QUOTA_DATE_KEY = "pinnapi_quota_date"
+_PINNAPI_QUOTA_COUNT_KEY = "pinnapi_quota_count"
+
+# Remaining-quota headers pinnapi may return on the markets response; read them
+# instead of the local counter when present (probed at startup, ADR-0004).
+pinnapi_quota_headers = {}
 
 # One-time distinct-league_name logger so the allowlist can be tuned from the
 # real feed rather than guessed (pinnapi does not enumerate league labels).
@@ -754,9 +786,157 @@ def _log_pinnapi_league(league_name):
         print(f"🪧 pinnapi distinct league_name: {league_name!r}")
 
 
+def _pinnapi_quota_count():
+    """Today's persisted pinnapi pull count (date-rolled, stored in the
+    notification_config KV store)."""
+    cfg = load_notification_config()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if cfg.get(_PINNAPI_QUOTA_DATE_KEY) != today:
+        return 0
+    try:
+        return int(cfg.get(_PINNAPI_QUOTA_COUNT_KEY, "0"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _pinnapi_quota_increment():
+    """Persist one more pinnapi pull for today (resets the count on date roll)."""
+    cfg = load_notification_config()
+    today = datetime.now().strftime("%Y-%m-%d")
+    count = 0
+    if cfg.get(_PINNAPI_QUOTA_DATE_KEY) == today:
+        try:
+            count = int(cfg.get(_PINNAPI_QUOTA_COUNT_KEY, "0"))
+        except (TypeError, ValueError):
+            count = 0
+    count += 1
+    save_notification_config({
+        _PINNAPI_QUOTA_DATE_KEY: today,
+        _PINNAPI_QUOTA_COUNT_KEY: str(count),
+    })
+    return count
+
+
+def _pinnapi_daily_budget():
+    """Expected pinnapi pulls/day computed from the LIVE active-hours window
+    (business_hours_start/end in the notification_config KV store, editable in
+    Settings → Push Notifications → Active Scan Hours) and the 15-minute
+    cadence: cadence pulls ≈ W×60/C, plus one startup pull per deploy and ~one
+    CLV-sniper pull per real NBA bet/day. The 85 soft-cap is the enforcement;
+    this number is the projection."""
+    cfg = load_notification_config()
+    try:
+        start_hour = int(cfg.get("business_hours_start", "7"))
+        end_hour = int(cfg.get("business_hours_end", "23"))
+    except (TypeError, ValueError):
+        start_hour, end_hour = 7, 23
+    if start_hour <= end_hour:
+        window_hours = end_hour - start_hour
+    else:
+        window_hours = (24 - start_hour) + end_hour  # overnight wrap
+    window_hours = max(0, min(24, window_hours))
+    cadence_pulls = int(window_hours * 60 / PINNAPI_CADENCE_MINUTES)
+    return cadence_pulls + 1 + 8  # + startup pull + ~8 sniper pulls
+
+
+def _capture_pinnapi_quota_headers(headers):
+    global pinnapi_quota_headers
+    pinnapi_quota_headers = {
+        k: v for k, v in headers.items()
+        if any(tok in k.lower()
+               for tok in ("request", "quota", "remaining", "rate", "limit"))
+    }
+    if pinnapi_quota_headers:
+        print(f"🪧 pinnapi quota headers seen: {pinnapi_quota_headers}")
+
+
+def _pinnapi_remaining_quota():
+    """Remaining daily quota for reporting: pinnapi's own header when it ships
+    one, else derived from the local counter against the ~100/day ceiling."""
+    if pinnapi_quota_headers:
+        for k, v in pinnapi_quota_headers.items():
+            if "remaining" in k.lower():
+                return v
+    return str(max(0, PINNAPI_DAILY_CEILING - _pinnapi_quota_count()))
+
+
+def _warn_pinnapi_quota(count):
+    topic = (load_notification_config().get("ntfy_topic") or "").strip() or NTFY_TOPIC
+    if topic:
+        send_ntfy_notification(
+            "pinnapi quota warning",
+            f"Daily pinnapi pulls reached {count}.\n"
+            f"Soft-cap at {PINNAPI_SOFT_CAP}/day: beyond it scans serve cached lines.",
+            topic,
+        )
+    print(f"🟠 pinnapi quota warning: {count} pulls today (soft-cap {PINNAPI_SOFT_CAP}).")
+
+
+def _pinnapi_fetch_raw(league):
+    """Fetch the raw pinnapi /kit/v1/markets payload shared across leagues.
+
+    sport_id=3 already contains NBA + NCAA, so ONE HTTP request serves every
+    pinnapi league; the daily quota counter increments once per request.
+
+    Returns (payload, fresh): fresh=True when the payload is newly pulled (this
+    call, or a same-window pull by another league still inside CACHE_DURATION);
+    fresh=False when served stale from the daily soft-cap (logged, no pull).
+    Returns (None, False) when the pull failed or PINNAPI_KEY is unset.
+    """
+    global pinnapi_raw_cache
+    now = time.time()
+
+    # Shared-cache reuse: a pull within CACHE_DURATION (900s ≈ one 15-min
+    # heartbeat) serves every league without a second HTTP request.
+    if pinnapi_raw_cache["data"] is not None and \
+            (now - pinnapi_raw_cache["last_updated"] < CACHE_DURATION):
+        return pinnapi_raw_cache["data"], True
+
+    if not PINNAPI_KEY:
+        print("⚠️ PINNAPI_KEY not set; skipping pinnapi fetch.")
+        return None, False
+
+    # Daily soft-cap: beyond 85 pulls/day serve cached lines (logged) instead
+    # of pulling — a widened window or extra force-scans degrade here by design,
+    # never onto pinnapi's bare 403 wall.
+    if _pinnapi_quota_count() >= PINNAPI_SOFT_CAP:
+        print(f"🛑 pinnapi soft-cap reached ({_pinnapi_quota_count()}/day): "
+              f"serving cached lines instead of a new pull.")
+        return pinnapi_raw_cache["data"], False
+
+    pconf = league["pinnacle"]
+    url = f"{PINNAPI_BASE}/kit/v1/markets"
+    params = {
+        "sport_id": pconf.get("sport_id", 3),
+        "event_type": pconf.get("event_type", "prematch"),
+    }
+    try:
+        resp = requests.get(url, params=params,
+                            headers={"x-portal-apikey": PINNAPI_KEY}, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as e:
+        print(f"❌ Error fetching pinnapi: {e}")
+        return None, False
+
+    _capture_pinnapi_quota_headers(resp.headers)
+    prev = _pinnapi_quota_count()
+    count = _pinnapi_quota_increment()
+    if prev < PINNAPI_WARN_THRESHOLD <= count:
+        _warn_pinnapi_quota(count)
+    pinnapi_raw_cache = {"last_updated": now, "data": payload}
+    return payload, True
+
+
 def fetch_pinnapi_cached(league, require_fresh=True):
     """Fetch prematch markets for a league from pinnapi and normalize to the
-    The Odds API event shape. One fresh pull saves a league-stamped snapshot."""
+    The Odds API event shape. One fresh pull saves a league-stamped snapshot.
+
+    Failure split by betting league (ADR-0004): a fresh-fetch failure on a
+    real-bet league (notify=True) ABORTS the scan — returns empty and logs
+    loudly, never stale pricing for bets. Research leagues (notify=False) keep
+    the stale-cache fallback. The daily soft-cap serves cached lines for every
+    league (the fail-safe, logged)."""
     global pinnapi_cache
     cached = pinnapi_cache.get(league["name"])
     current_time = time.time()
@@ -766,33 +946,43 @@ def fetch_pinnapi_cached(league, require_fresh=True):
     if cached and (current_time - cached["last_updated"] < CACHE_DURATION):
         return cached["data"]
 
-    if not PINNAPI_KEY:
-        print("⚠️ PINNAPI_KEY not set; skipping pinnapi fetch.")
+    raw, fresh = _pinnapi_fetch_raw(league)
+    if raw is None:
+        if league.get("notify", True):
+            print(f"🚨 {league['name']} (real-bet league): fresh pinnapi pull "
+                  f"FAILED — aborting scan, no stale pricing for bets.")
+            return []
+        print(f"⚠️ {league['name']}: pinnapi pull failed; serving stale fallback.")
         return cached["data"] if cached else []
 
-    url = f"{PINNAPI_BASE}/kit/v1/markets"
-    params = {
-        "sport_id": league["pinnacle"].get("sport_id", 3),
-        "event_type": league["pinnacle"].get("event_type", "prematch"),
-    }
-    headers = {"x-portal-apikey": PINNAPI_KEY}
-
-    try:
-        resp = requests.get(url, params=params, headers=headers, timeout=20)
-        resp.raise_for_status()
-        clean_data = parse_pinnapi_data(resp.json(), league)
-
+    clean_data = parse_pinnapi_data(raw, league)
+    if fresh:
         if clean_data:
             save_snapshot_to_db(clean_data, league["name"])
-
         pinnapi_cache[league["name"]] = {
-            "last_updated": current_time,
-            "data": clean_data,
+            "last_updated": current_time, "data": clean_data,
         }
-        return clean_data
-    except Exception as e:
-        print(f"Error fetching pinnapi ({league['name']}): {e}")
-        return cached["data"] if cached else []
+    elif not cached:
+        # Cold start under the soft-cap: surface the stale lines but keep the
+        # cache stale so every heartbeat re-logs the degradation.
+        pinnapi_cache[league["name"]] = {"last_updated": 0, "data": clean_data}
+    return clean_data
+
+
+def _probe_pinnapi_at_startup():
+    """Startup probe (ADR-0004): warm the shared raw cache with one pull, log
+    pinnapi remaining-quota headers if present (preferred over the local
+    counter), and log the expected daily pull budget from the live window.
+    Non-fatal: a failed probe just leaves the cache cold."""
+    league = _league_by_name("NBA") or LEAGUES[0]
+    raw, fresh = _pinnapi_fetch_raw(league)
+    print(f"📊 pinnapi daily budget projection (live active-hours window): "
+          f"≈ {_pinnapi_daily_budget()} pulls/day (soft-cap {PINNAPI_SOFT_CAP}, "
+          f"ceiling ~{PINNAPI_DAILY_CEILING}).")
+    if fresh and isinstance(raw, dict):
+        print(f"✅ pinnapi startup probe: fresh pull ({len(raw.get('events') or [])} events).")
+    else:
+        print("ℹ️ pinnapi startup probe: no fresh pull yet (heartbeat will retry).")
 
 
 def _pick_primary_line(entries):
@@ -1799,9 +1989,26 @@ def settle_paper_bets():
     conn.close()
     print(f"🏁 Paper Settlement Complete. Updated {updated_count}/{len(pending)} bets.")
 
+# SNAPSHOT HYGIENE (ADR-0004): market_snapshots grows ~6x at the 15-min
+# cadence; prune rows older than 30 days once a day — their CLV read (the
+# latest snapshot before game start) has long resolved.
+def prune_old_snapshots():
+    try:
+        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM market_snapshots WHERE timestamp < ?", (cutoff,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            print(f"🧹 Pruned {deleted} market_snapshots older than 30 days.")
+    except Exception as e:
+        print(f"Error pruning market_snapshots: {e}")
+
 # STARTUP: Schedule the Heartbeat
-# 'cron' trigger allows us to specify "every 90 minutes" somewhat loosely, 
-# but 'interval' is easier. We handle the 7-23 check inside the function.
+# 'interval' trigger; the active-hours (07-23 default) check runs inside
+# run_scheduled_scan from the live business_hours_start/end KV values.
 
 try:
     # Remove existing job if it exists (to prevent duplicates on reload)
@@ -1812,12 +2019,12 @@ except JobLookupError:
 scheduler.add_job(
     run_scheduled_scan, 
     'interval', 
-    minutes=90, 
+    minutes=15, 
     id='market_heartbeat',
     replace_existing=True
 )
 
-print("📅 Automated 'Heartbeat' Scanner scheduled (Every 90 mins).")
+print("📅 Automated 'Heartbeat' Scanner scheduled (Every 15 mins).")
 
 # SETTLEMENT: idempotent run every 4 hours (ADR-0003).
 # Replaces the old 05:00 daily cron: in winter 05:00 CET == 23:00 ET the prior
@@ -1838,10 +2045,33 @@ scheduler.add_job(
 )
 print("⏰ Idempotent settlement scheduled every 4 hours.")
 
+# SNAPSHOT PRUNE: daily cleanup of resolved snapshots.
+try:
+    scheduler.remove_job('snapshot_prune')
+except JobLookupError:
+    pass
+
+scheduler.add_job(
+    prune_old_snapshots,
+    'interval',
+    hours=24,
+    id='snapshot_prune',
+    replace_existing=True
+)
+print("🧹 market_snapshots prune scheduled (daily, older than 30 days).")
+
 # Run this on startup
 init_db()
 migrate_to_rules()  # One-time migration to rule-based notifications
 restore_clv_jobs() # Restore jobs if server restarts
+
+# pinnapi startup probe (ADR-0004): one pull warms the shared raw cache, logs
+# remaining-quota headers (preferred over the local counter) and the expected
+# daily pull budget from the live active-hours window. Non-fatal on failure.
+try:
+    _probe_pinnapi_at_startup()
+except Exception as e:
+    print(f"⚠️ pinnapi startup probe failed (non-fatal): {e}")
 
 class BetRequest(BaseModel):
     match_name: str
@@ -1885,14 +2115,16 @@ def health():
 
 @app.get("/api/opportunities")
 def get_opportunities(refresh: bool = False):
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="API_KEY not set in .env file")
+    # NBA pricing comes from the league's provider (pinnapi, ADR-0004) so the
+    # home view prices from the same sharp feed bets are priced from. The Odds
+    # API is retired from the pull path.
+    nba_league = _league_by_name("NBA") or LEAGUES[0]
 
     # 1. Get Data
-    danske_data = fetch_danske_spil()
+    danske_data = fetch_danske_spil(nba_league)
     # If refresh=True, we ask for fresh data (checks timer).
     # If refresh=False, we accept whatever is in memory.
-    pinnacle_data = fetch_pinnacle_cached(require_fresh=refresh)
+    pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=refresh)
     
     if not danske_data: # If Danske fails, we can't do anything
         return {"message": "Error fetching Danske Spil", "data": []}
@@ -1900,7 +2132,7 @@ def get_opportunities(refresh: bool = False):
     # If we have no Pinnacle data at all (first run), we might return empty
     if not pinnacle_data:
         # Optional: Force fetch if it's the very first run ever
-        pinnacle_data = fetch_pinnacle_cached(require_fresh=True)
+        pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=True)
 
     # ... piggyback update ...
     update_clv_for_placed_bets(pinnacle_data)
@@ -1911,8 +2143,8 @@ def get_opportunities(refresh: bool = False):
     
     return {
         "timestamp": datetime.now().isoformat(),
-        "pinnacle_age": pinnacle_cache["last_updated"],
-        "quota_remaining": latest_quota["remaining"],
+        "pinnacle_age": pinnapi_raw_cache["last_updated"],
+        "quota_remaining": _pinnapi_remaining_quota(),
         "count": len(opportunities),
         "data": opportunities
     }
