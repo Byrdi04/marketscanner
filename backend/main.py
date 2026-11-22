@@ -1232,8 +1232,10 @@ def find_clv_for_paper_bet(bet_row):
     fair_prob = None
 
     if market_type == 'Spread' and d_line is not None:
+        # Normalize BOTH sides (selection may keep raw Danske casing).
         is_home = bool(p_event.get('home_team') and
-                       selection == resolve_team_name(p_event['home_team']))
+                       resolve_team_name(selection)
+                       == resolve_team_name(p_event['home_team']))
         fair_prob = fair_prob_at_handicap(p_target_market, float(d_line), is_home)
     elif market_type == 'Total' and d_line is not None:
         fair_prob = fair_prob_at_total(p_target_market, float(d_line), "Over" in bet_row['selection'])
@@ -1516,8 +1518,11 @@ def run_analysis(danske_events, pinnacle_events, min_match_score=80):
 
             if d_market['type'] == 'Spread' and d_line is not None:
                 # Price this exact handicap from Pinnacle's full line curve.
+                # Normalize BOTH sides: for home_token leagues match_selection
+                # keeps the raw Danske casing, while p_event home is lowercase.
                 is_home = bool(p_event.get('home_team') and
-                               match_selection == resolve_team_name(p_event['home_team']))
+                               resolve_team_name(match_selection)
+                               == resolve_team_name(p_event['home_team']))
                 fair_prob = fair_prob_at_handicap(p_target_market, float(d_line), is_home)
             elif d_market['type'] == 'Total' and d_line is not None:
                 is_over = "Over" in d_selection
