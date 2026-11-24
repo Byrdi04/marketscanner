@@ -39,8 +39,13 @@ FEATURE_LABELS = {
     "is_favorite": "Favourite (neg. handicap)",
 }
 
-# First 60% of the timeline = train, later 40% = holdout
-SPLIT_FRACTION = 0.6
+# The model refuses to fit below this many settled bets in the view.
+MODEL_FLOOR = 60
+
+# Walk-forward folds: the model is fit on the past and validated on the future,
+# repeatedly, so every settled bet is finally used for validation (no 40%-only
+# single holdout). The most-recent fold stays the displayed "holdout".
+N_FOLDS = 5
 
 
 def _add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,13 +55,20 @@ def _add_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def temporal_split(df: pd.DataFrame, split_frac: float = SPLIT_FRACTION):
-    """Chronological split: train on the past, holdout on the future."""
+def _walk_forward_assign(df: pd.DataFrame, n_folds: int = N_FOLDS) -> pd.DataFrame:
+    """Stamp each row with a chronological fold index 0..n_folds-1 (0 = oldest)."""
     df = df.sort_values("timestamp").reset_index(drop=True)
-    cutoff = df["timestamp"].quantile(split_frac)
-    train = df[df["timestamp"] <= cutoff]
-    holdout = df[df["timestamp"] > cutoff]
-    return train, holdout, cutoff
+    df["fold"] = pd.qcut(np.arange(len(df)), n_folds, labels=False).astype(int)
+    return df
+
+
+def _pick_folds(n: int, n_folds: int = N_FOLDS, min_holdout: int = 20, min_train: int = 40):
+    """Largest fold count that keeps every trailing holdout and its train set big
+    enough. Returns None when even 3 folds can't be formed (sample too small)."""
+    k = n_folds
+    while k > 2 and (n / k < min_holdout or n * (k - 1) / k < min_train):
+        k -= 1
+    return k if k >= 3 else None
 
 
 def build_model(
@@ -68,50 +80,77 @@ def build_model(
     min_odds: float = 1.0,
     max_odds: float = 1e9,
     league: str | None = None,
+    market: str = "All",
 ) -> dict:
-    base = {"available": SKLEARN_AVAILABLE}
+    base = {"available": SKLEARN_AVAILABLE, "market": market if market != "All" else "all"}
     if not SKLEARN_AVAILABLE:
         return base
 
-    df = _add_features(load_settled(league=league))
+    df = _add_features(load_settled(league=league, market=market))
     used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
-    if len(used) < 60:
-        return {**base, "error": "Need ≥ 60 settled bets in this view to fit the model.", "meta": meta}
+    # Money-line bets have no handicap, so |handicap| is NaN — the model can't use
+    # them. Drop feature-incomplete rows before the floor check.
+    used = used.dropna(subset=FEATURES)
+    meta["n_used"] = len(used)
+    meta["floor"] = MODEL_FLOOR
+    if len(used) < MODEL_FLOOR:
+        return {**base, "error": f"Need ≥ {MODEL_FLOOR} settled bets in this view to fit the model.", "meta": meta}
 
-    train, holdout, cutoff = temporal_split(used)
-    if len(train) < 40 or len(holdout) < 20:
-        return {**base, "error": "Too few bets in train/holdout after the time split.", "meta": meta}
-
+    # Walk-forward: stamp chronological folds, report pooled out-of-sample log_loss
+    # over every validation fold, and use the most recent fold as the display holdout.
+    K = _pick_folds(len(used))
+    if K is None:
+        return {**base, "error": "Too few settled bets to form valid walk-forward folds.", "meta": meta}
+    used = _walk_forward_assign(used, K)
+    K = int(used["fold"].nunique())
     X = FEATURES
-    y = train["won"]
 
-    # --- 1. Logistic regression (primary) ---
-    pipe_lr = Pipeline([
-        ("scale", StandardScaler()),
-        ("model", LogisticRegression(max_iter=2000, C=1.0, random_state=42)),
-    ])
-    pipe_lr.fit(train[X], y)
-    hold_prob_lr = pipe_lr.predict_proba(holdout[X])[:, 1]
+    def _lr_pipe():
+        return Pipeline([
+            ("scale", StandardScaler()),
+            ("model", LogisticRegression(max_iter=2000, C=1.0, random_state=42)),
+        ])
 
-    base_prob = float(train["won"].mean())
-    baseline_ll = float(log_loss(holdout["won"], [base_prob] * len(holdout)))
-    lr_ll = float(log_loss(holdout["won"], hold_prob_lr))
+    # --- 1. Pooled walk-forward log_loss (honest out-of-sample read) ---
+    fold = {"baseline": [], "logistic": [], "gbm": []}
+    for k in range(1, K):
+        tr = used[used["fold"] < k]
+        ho = used[used["fold"] == k]
+        if len(tr) < 40 or len(ho) < 20:
+            continue
+        p = _lr_pipe()
+        p.fit(tr[X], tr["won"])
+        prob = p.predict_proba(ho[X])[:, 1]
+        bp = float(tr["won"].mean())
+        fold["baseline"].append(float(log_loss(ho["won"], [bp] * len(ho))))
+        fold["logistic"].append(float(log_loss(ho["won"], prob)))
+        try:
+            gbm = GradientBoostingClassifier(
+                n_estimators=120, max_depth=3, learning_rate=0.05, random_state=42
+            )
+            gbm.fit(tr[X], tr["won"])
+            fold["gbm"].append(float(log_loss(ho["won"], gbm.predict_proba(ho[X])[:, 1])))
+        except Exception:
+            pass
+    if not fold["logistic"]:
+        return {**base, "error": "Too few bets to form valid walk-forward folds.", "meta": meta}
+    baseline_ll = round(float(np.mean(fold["baseline"])), 4)
+    lr_ll = round(float(np.mean(fold["logistic"])), 4)
+    gbm_ll = round(float(np.mean(fold["gbm"])), 4) if fold["gbm"] else None
+
+    # --- 2. Final model trained on all but the last fold (display) ---
+    last = K - 1
+    dtr = used[used["fold"] < last]
+    dho = used[used["fold"] == last]
+    pipe_lr = _lr_pipe()
+    pipe_lr.fit(dtr[X], dtr["won"])
+    hold_prob_lr = pipe_lr.predict_proba(dho[X])[:, 1]
+    base_prob = float(dtr["won"].mean())
     lr_coefs = pipe_lr.named_steps["model"].coef_[0]
 
-    # --- 2. GBM cross-check (does fancier ML beat the logistic rule?) ---
-    gbm_ll = None
-    try:
-        gbm = GradientBoostingClassifier(
-            n_estimators=120, max_depth=3, learning_rate=0.05, random_state=42
-        )
-        gbm.fit(train[X], y)
-        gbm_ll = float(log_loss(holdout["won"], gbm.predict_proba(holdout[X])[:, 1]))
-    except Exception:
-        pass
-
     # --- 3. CLV regression (diagnostic target ≈ true long-run edge) ---
-    clv_train = train.dropna(subset=["clv_pct"])
-    clv_hold = holdout.dropna(subset=["clv_pct"])
+    clv_train = dtr.dropna(subset=["clv_pct"])
+    clv_hold = dho.dropna(subset=["clv_pct"])
     clv_r2 = None
     clv_coefs = [None] * len(X)
     if len(clv_train) >= 60 and len(clv_hold) >= 10:
@@ -121,8 +160,8 @@ def build_model(
         clv_r2 = float(r2_score(clv_hold["clv_pct"], clv_pred))
         clv_coefs = pipe_clr.named_steps["model"].coef_
 
-    # --- 4. Decile calibration of the model ranking on the holdout ---
-    hold = holdout.copy()
+    # --- 4. Decile calibration of the model ranking on the final holdout ---
+    hold = dho.copy()
     hold["pred"] = hold_prob_lr
     deciles = []
     try:
@@ -149,24 +188,25 @@ def build_model(
         **base,
         "meta": {
             **meta,
-            "split_fraction": SPLIT_FRACTION,
-            "cutoff": cutoff.strftime("%Y-%m-%d"),
-            "train_n": len(train),
-            "holdout_n": len(holdout),
+            "validation_method": "walk_forward",
+            "folds": K,
+            "cutoff": dho["timestamp"].min().strftime("%Y-%m-%d"),
+            "train_n": len(dtr),
+            "holdout_n": len(dho),
         },
         "holdout": {
-            "n": len(holdout),
-            "wins": int(holdout["won"].sum()),
-            "win_rate": round(float(holdout["won"].mean() * 100.0), 1),
-            "roi": round(float(holdout["profit"].mean() * 100.0), 2),
-            "bets_per_month": round(len(holdout) / max(_months_span(holdout), 0.1), 1),
-            "months": round(float(_months_span(holdout)), 1),
+            "n": len(dho),
+            "wins": int(dho["won"].sum()),
+            "win_rate": round(float(dho["won"].mean() * 100.0), 1),
+            "roi": round(float(dho["profit"].mean() * 100.0), 2),
+            "bets_per_month": round(len(dho) / max(_months_span(dho), 0.1), 1),
+            "months": round(float(_months_span(dho)), 1),
         },
         "model": {
             "train_win_rate": round(base_prob * 100.0, 1),
-            "baseline_log_loss": round(baseline_ll, 4),
-            "logistic_log_loss": round(lr_ll, 4),
-            "gbm_log_loss": round(gbm_ll, 4) if gbm_ll is not None else None,
+            "baseline_log_loss": baseline_ll,
+            "logistic_log_loss": lr_ll,
+            "gbm_log_loss": gbm_ll,
         },
         "coefficients": [
             {
@@ -194,22 +234,32 @@ def build_sweep(
     max_odds: float = 1e9,
     ev_grid=(0.0, 0.5, 1.0, 2.0, 3.0, 5.0),
     hours_grid=(0.0, 3.0, 6.0, 12.0),
-    split_frac: float = SPLIT_FRACTION,
     min_n: int = 5,
     league: str | None = None,
+    market: str = "All",
 ) -> dict:
-    """Bets/month vs ROI frontier over (min EV × min hours) rules, holdout-only."""
-    base = {"available": SKLEARN_AVAILABLE}
+    """Bets/month vs ROI frontier over (min EV × min hours) rules, evaluated on the
+    pooled walk-forward validation folds (every settled bet serves as a holdout)."""
+    base = {"available": SKLEARN_AVAILABLE, "market": market if market != "All" else "all"}
     if not SKLEARN_AVAILABLE:
         return base
 
-    df = _add_features(load_settled(league=league))
+    df = _add_features(load_settled(league=league, market=market))
     used, meta = apply_view(
         df, dedup, max_ev=max_ev, max_minutes=max_hours * 60.0,
         min_odds=min_odds, max_odds=max_odds,
     )
-    train, holdout, cutoff = temporal_split(used, split_frac)
-    months = max(float(_months_span(holdout)), 0.1)
+    meta["floor"] = MODEL_FLOOR
+    if len(used) < MODEL_FLOOR:
+        return {**base, "error": f"Need ≥ {MODEL_FLOOR} settled bets in this view to sweep rules.", "meta": meta}
+
+    K = _pick_folds(len(used))
+    if K is None:
+        return {**base, "error": "Too few settled bets to form valid walk-forward folds.", "meta": meta}
+    used = _walk_forward_assign(used, K)
+    val = used[used["fold"] > 0]  # pooled validation folds (everything except the oldest)
+    K = int(used["fold"].nunique())
+    months = max(float(_months_span(val)), 0.1)
 
     rows = []
     for ev in ev_grid:
@@ -218,7 +268,7 @@ def build_sweep(
         for h in hours_grid:
             if h > max_hours:
                 continue
-            sub = holdout[(holdout["ev_percent"] >= ev) & (holdout["hours_to_start"] >= h)]
+            sub = val[(val["ev_percent"] >= ev) & (val["hours_to_start"] >= h)]
             if len(sub) < min_n:
                 continue
             roi = float(sub["profit"].mean() * 100.0)
@@ -239,9 +289,11 @@ def build_sweep(
         **base,
         "meta": {
             "dedup": dedup,
-            "cutoff": cutoff.strftime("%Y-%m-%d"),
-            "train_n": len(train),
-            "holdout_n": len(holdout),
+            "validation_method": "walk_forward",
+            "folds": K,
+            "cutoff": val["timestamp"].min().strftime("%Y-%m-%d"),
+            "train_n": int((used["fold"] == 0).sum()),
+            "holdout_n": len(val),
             "months": round(months, 1),
         },
         "rows": rows,

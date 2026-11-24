@@ -22,6 +22,7 @@ interface RoiRow extends SortRow {
   wins: number;
   win_rate: number;
   roi: number;
+  roi_shrunk?: number;
   ci_low: number;
   ci_high: number;
   avg_clv: number | null;
@@ -53,12 +54,18 @@ interface StrategyData {
     n_duplicates_excluded: number;
     n_filtered_out: number;
     n_used: number;
+    league?: string;
+    market?: string;
+    floor?: number;
+    n_analyzable?: boolean;
   };
   overall: {
     n: number; wins: number; win_rate: number; roi: number;
     ci_low: number; ci_high: number; avg_clv: number | null;
+    expected_edge_clv?: number | null;
     bets_per_month: number; months: number;
   } | null;
+  clv_coverage?: { pct: number | null; with_closing: number; total: number };
   calibration: CalRow[];
   correlations: CorrRow[];
   dimensions: Record<string, { title: string; rows: RoiRow[] }>;
@@ -69,10 +76,12 @@ interface ModelData {
   error?: string;
   meta?: {
     n_used: number;
-    split_fraction: number;
     cutoff: string;
     train_n: number;
     holdout_n: number;
+    validation_method?: string;
+    folds?: number;
+    floor?: number;
   };
   holdout?: {
     n: number; wins: number; win_rate: number; roi: number;
@@ -122,6 +131,9 @@ const DEDUP_MODES = [
   { value: "game", label: "One per game (earliest price)" },
 ] as const;
 
+const LEAGUE_OPTIONS = ["NCAA", "NBA"] as const;
+const MARKET_OPTIONS = ["All", "Spread", "Total", "MoneyLine"] as const;
+
 const DIMENSION_ORDER = [
   "roi_by_ev", "roi_by_time", "roi_by_odds", "roi_by_handicap", "roi_by_clv",
 ] as const;
@@ -129,9 +141,9 @@ const DIMENSION_ORDER = [
 const DIMENSION_BLURB: Record<string, string> = {
   roi_by_ev: "Does the EV estimate actually translate to profit? Wide CIs = very noisy evidence.",
   roi_by_time: "Your priored feature: is betting earlier (or later) than game start better?",
-  roi_by_odds: "Odds magnitude (decimal odds level). All settled bets are Spreads at 1.93–2.35, so bins are single price levels.",
-  roi_by_handicap: "Spread size — favourite vs dog margin.",
-  roi_by_clv: "Bets grouped by how much the closing line moved. CLV ≈ true long-run edge, but only 83% of bets have a closing price.",
+  roi_by_odds: "Odds magnitude (decimal odds level). Bin boundaries mirror the price points actually seen in the data.",
+  roi_by_handicap: "Spread margin — favourite vs dog. Only defined for spread bets (money-line rows are NaN here).",
+  roi_by_clv: "Bets grouped by how much the closing line moved. CLV ≈ true long-run edge, but only some bets have a captured closing price (see coverage note).",
 };
 
 const EV_GRID = [0, 0.5, 1, 2, 3, 5];
@@ -148,6 +160,8 @@ export default function StrategyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dedup, setDedup] = useState<string>("match_selection");
+  const [league, setLeague] = useState<string>("NCAA");
+  const [market, setMarket] = useState<string>("All");
   const [minEv, setMinEv] = useState(0);
   const [maxEv, setMaxEv] = useState(10);
   const [minHours, setMinHours] = useState(0);
@@ -164,6 +178,8 @@ export default function StrategyPage() {
   const buildUrls = useCallback(() => {
     const base = {
       dedup,
+      league,
+      market,
       min_ev: String(minEv),
       max_ev: String(maxEv),
       min_minutes: String(minHours * 60),
@@ -175,9 +191,9 @@ export default function StrategyPage() {
     return {
       evidence: `/api/strategy-analysis?${q.toString()}`,
       model: `/api/strategy-model?${q.toString()}`,
-      sweep: `/api/strategy-sweep?${new URLSearchParams({ dedup, max_ev: String(maxEv), max_hours: String(maxHours), min_odds: String(minOdds), max_odds: String(maxOdds) }).toString()}`,
+      sweep: `/api/strategy-sweep?${new URLSearchParams({ dedup, league, market, max_ev: String(maxEv), max_hours: String(maxHours), min_odds: String(minOdds), max_odds: String(maxOdds) }).toString()}`,
     };
-  }, [dedup, minEv, maxEv, minHours, maxHours, minOdds, maxOdds]);
+  }, [dedup, league, market, minEv, maxEv, minHours, maxHours, minOdds, maxOdds]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -419,6 +435,39 @@ const changeMaxOdds = (raw: number) => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
             <label className="block">
+              <span className="text-xs uppercase font-semibold text-slate-500">League</span>
+              <div className="mt-1 flex rounded-md border border-slate-700 overflow-hidden">
+                {LEAGUE_OPTIONS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setLeague(l)}
+                    className={`flex-1 px-3 py-1.5 text-sm font-medium transition-colors ${
+                      league === l
+                        ? "bg-emerald-500 text-slate-950"
+                        : "bg-slate-800/60 text-slate-300 hover:bg-slate-700/60"
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase font-semibold text-slate-500">Market</span>
+              <select
+                value={market}
+                onChange={(e) => setMarket(e.target.value)}
+                className="select mt-1"
+              >
+                {MARKET_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{m === "All" ? "All markets" : m}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
               <span className="text-xs uppercase font-semibold text-slate-500">Dedup (correlated bets)</span>
               <select
                 value={dedup}
@@ -520,8 +569,20 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
       </div>
     );
   }
+  const floor = data.meta.floor ?? 30;
+  const belowFloor = (data.meta.n_analyzable ?? true) === false;
+  const needMore = Math.max(0, floor - data.overall.n);
   return (
     <>
+      {belowFloor && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 mb-6">
+          <b>Insufficient settled data to trust this view.</b> Only {data.overall.n} settled bets here (evidence tables
+          need ≥ {floor}). ROI numbers below are very noisy{needMore > 0 && <> — come back after ~{needMore} more bets have
+          settled.</>}
+          {data.meta.market ? ` Market: ${data.meta.market}.` : ""}
+        </div>
+      )}
+
       {/* OVERALL CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
         <Card label="Bets used" value={data.overall.n.toLocaleString()} />
@@ -535,9 +596,10 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
           sub={`95% CI [${data.overall.ci_low}%, ${data.overall.ci_high}%]`}
         />
         <Card
-          label="Avg CLV"
-          value={data.overall.avg_clv == null ? "–" : `${data.overall.avg_clv >= 0 ? "+" : ""}${data.overall.avg_clv}%`}
-          valueClass={(data.overall.avg_clv ?? 0) >= 0 ? "text-emerald-400" : "text-amber-400"}
+          label="Expected edge (CLV)"
+          value={data.overall.expected_edge_clv == null ? "–" : `${data.overall.expected_edge_clv >= 0 ? "+" : ""}${data.overall.expected_edge_clv}%`}
+          valueClass={(data.overall.expected_edge_clv ?? data.overall.avg_clv ?? 0) >= 0 ? "text-emerald-400" : "text-amber-400"}
+          sub={data.clv_coverage?.pct != null ? `closing-line edge · CLV coverage ${data.clv_coverage.pct}%` : undefined}
         />
       </div>
 
@@ -547,8 +609,9 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
         {data.meta.total_logged.toLocaleString()} logged · {data.meta.n_pending_excluded} pending excluded ·{" "}
         {data.meta.n_settled.toLocaleString()} settled · {data.meta.n_duplicates_excluded.toLocaleString()} duplicates excluded ·{" "}
         {data.meta.n_filtered_out.toLocaleString()} filtered out by thresholds ·{" "}
-        <b>{data.meta.n_used.toLocaleString()} used</b>. Note: only EV &gt; 0 bets are ever logged (selection bias), and
-        every settled bet here is a Spread.
+        <b>{data.meta.n_used.toLocaleString()} used</b>. Note: only EV &gt; 0 bets are ever logged (selection bias).{" "}
+        {data.meta.market ? `Market: ${data.meta.market}.` : "All markets."}{" "}
+        {data.clv_coverage?.pct != null && <>CLV (closing-line edge) is defined on {data.clv_coverage.pct}% of these bets.</>}
       </div>
 
       {/* CALIBRATION */}
@@ -616,6 +679,18 @@ function EvidenceTab({ data, loading }: { data: StrategyData | null; loading: bo
                       key: "ci_low",
                       label: "95% CI",
                       render: (r) => `[${Number(r.ci_low)}%, ${Number(r.ci_high)}%]`,
+                    },
+                    {
+                      key: "roi_shrunk",
+                      label: "Shrunk ROI %",
+                      render: (r) => {
+                        const s = r.roi_shrunk == null ? null : Number(r.roi_shrunk);
+                        return s == null ? "–" : (
+                          <span className="text-slate-300" title="Empirical-Bayes estimate pulled toward the view mean — dampens small-n noise">
+                            {s >= 0 ? "+" : ""}{s}%
+                          </span>
+                        );
+                      },
                     },
                     { key: "bets_per_month", label: "Bets/mo" },
                     {
@@ -722,12 +797,13 @@ function ModelTab({ modelData, sweepData, loading }: {
 
   return (
     <>
-      {/* TEMPORAL SPLIT */}
+      {/* TEMPORAL VALIDATION */}
       <div className="card mb-6 p-4 text-xs text-slate-400">
-        <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Temporal validation — </span>
-        trained on bets before <b>{model.meta?.cutoff}</b> ({model.meta?.train_n} bets), tested on bets after{" "}
-        <b>{model.meta?.cutoff}</b> ({model.meta?.holdout_n} bets, {h?.months} months). The holdout is the only
-        timespan that matters when judging whether a rule works.
+        <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Walk-forward validation — </span>
+        the timeline is split into {model.meta?.folds ?? "…"} chronological folds; each fold is validated with a model
+        trained only on the bets before it, so every settled bet finally serves as an out-of-sample test. The numbers
+        below use {model.meta?.holdout_n} bets in the <b>most recent</b> fold (from {model.meta?.cutoff}), trained on{" "}
+        {model.meta?.train_n} prior bets. This avoids a single lucky 60/40 split.
       </div>
 
       {/* HOLDOUT + MODEL CARDS */}
@@ -935,10 +1011,10 @@ function ModelTab({ modelData, sweepData, loading }: {
         ) : null}
 
         <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-4 text-xs leading-relaxed text-sky-100">
-          <b>Honest read of this sweep.</b> The high-ROI cells (EV ≥ 3–5%, late windows) have 10–70 holdout bets — a
-          single lucky stretch moves them by double digits. No cell&apos;s 95% CI excludes 0. The robust message is the
-          shape: rules between ~60 and ~150 bets/month (EV ≥ 2–3%, T ≥ 6–12h) sit consistently positive in this
-          holdout. Validate any chosen rule on the next month of fresh data before betting real money.
+          <b>Honest read of this sweep.</b> The high-ROI cells (high EV, late windows) usually have the fewest holdout
+          bets — a single lucky stretch can move them by double digits, and few cells&apos; 95% CIs exclude 0. The robust
+          message, if any, is the shape: a band of rules with enough bets/month to be credible and a consistently
+          positive ROI. Validate any chosen rule on the next month of fresh data before betting real money.
         </div>
       </Section>
     </>

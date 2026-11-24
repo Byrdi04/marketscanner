@@ -2357,6 +2357,15 @@ def get_analytics():
 # Uses ONLY already-collected paper_bets data — no extra API credits.
 # ---------------------------------------------------------
 
+ALLOWED_MARKETS = {"All", "Spread", "Total", "MoneyLine"}
+
+
+def _check_market(market: str) -> str:
+    if market not in ALLOWED_MARKETS:
+        raise HTTPException(status_code=400, detail="market must be All, Spread, Total or MoneyLine")
+    return market
+
+
 @app.get("/api/strategy-analysis")
 def get_strategy_analysis(
     dedup: str = "match_selection",
@@ -2367,6 +2376,7 @@ def get_strategy_analysis(
     min_odds: float = 1.0,
     max_odds: float = 100.0,
     league: str = "NBA",
+    market: str = "All",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -2379,6 +2389,7 @@ def get_strategy_analysis(
         min_odds=min_odds,
         max_odds=max_odds,
         league=league,
+        market=_check_market(market),
     )
 
 @app.get("/api/strategy-model")
@@ -2391,6 +2402,7 @@ def get_strategy_model(
     min_odds: float = 1.0,
     max_odds: float = 100.0,
     league: str = "NBA",
+    market: str = "All",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -2403,6 +2415,7 @@ def get_strategy_model(
         min_odds=min_odds,
         max_odds=max_odds,
         league=league,
+        market=_check_market(market),
     )
 
 @app.get("/api/strategy-sweep")
@@ -2413,6 +2426,7 @@ def get_strategy_sweep(
     min_odds: float = 1.0,
     max_odds: float = 100.0,
     league: str = "NBA",
+    market: str = "All",
 ):
     if dedup not in ("none", "match_selection", "game"):
         raise HTTPException(status_code=400, detail="dedup must be none, match_selection or game")
@@ -2423,6 +2437,7 @@ def get_strategy_sweep(
         min_odds=min_odds,
         max_odds=max_odds,
         league=league,
+        market=_check_market(market),
     )
 
 # ---------------------------------------------------------

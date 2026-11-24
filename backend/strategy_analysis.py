@@ -51,6 +51,20 @@ CLV_LABELS = ["<0%", "0–1%", "1–2.5%", "2.5–5%", ">5%"]
 
 Z = 1.96  # 95% CI
 
+# Minimum settled bets for the evidence tables to be worth rendering at all.
+# Below this the page shows an "insufficient data" empty state, not noisy bars.
+# (The model/sweep keep a higher floor of 60 settled bets.)
+MARKET_FLOOR = 30
+
+# Empirical-Bayes shrinkage: a bin's raw ROI is pulled toward the view's overall
+# ROI with weight n/(n+kappa). Keeps thin cells honest without hiding the raw CI.
+KAPPA = 20
+
+
+def _shrink(roi: float, n: int, prior: float) -> float:
+    w = n / (n + KAPPA)
+    return round(w * roi + (1 - w) * prior, 2)
+
 
 def _bucket(series: pd.Series, edges, labels) -> pd.Series:
     """Bucket into (len(edges)+1) bins with labels."""
@@ -58,16 +72,22 @@ def _bucket(series: pd.Series, edges, labels) -> pd.Series:
     return pd.cut(series, bins=bins, right=False, labels=labels)
 
 
-def load_settled(league=None) -> pd.DataFrame:
-    """Load settled paper bets with derived features. When `league` is given,
-    rows are constrained to that league so NBA and NCAA are never mixed."""
+def load_settled(league=None, market=None) -> pd.DataFrame:
+    """Load settled paper bets with derived features. When `league` and/or
+    `market` are given, rows are constrained so leagues and markets are never
+    silently mixed; `market="All"` (default) leaves the market unfiltered."""
     conn = sqlite3.connect(DB_NAME)
+    sql = "SELECT * FROM paper_bets"
+    where, params = [], []
     if league:
-        df = pd.read_sql_query(
-            "SELECT * FROM paper_bets WHERE league = ?", conn, params=(league,)
-        )
-    else:
-        df = pd.read_sql_query("SELECT * FROM paper_bets", conn)
+        where.append("league = ?")
+        params.append(league)
+    if market and market != "All":
+        where.append("market_type = ?")
+        params.append(market)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    df = pd.read_sql_query(sql, conn, params=params)
     conn.close()
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
@@ -89,8 +109,9 @@ def load_settled(league=None) -> pd.DataFrame:
     # Pinnacle fair implied probability (1 / fair price)
     df["implied_p"] = 1.0 / df["pinnacle_odds"]
 
-    # |handicap| — spread size as favorite/dog margin
-    df["abs_handicap"] = df["handicap"].abs()
+    # |handicap| — spread size as favorite/dog margin. NULL for money-line bets
+    # (no handicap), so coerce to NaN rather than crashing on None.
+    df["abs_handicap"] = pd.to_numeric(df["handicap"], errors="coerce").abs()
 
     return df
 
@@ -182,6 +203,7 @@ def table_by(df: pd.DataFrame, col: str, edges, labels) -> list:
         return []
     bucketed = _bucket(df[col], edges, labels)
     months = _months_span(df)
+    prior = float(df["profit"].mean() * 100.0)  # view-level ROI = shrinkage prior
     rows = []
     for label in labels:
         g = df[bucketed == label]
@@ -191,6 +213,7 @@ def table_by(df: pd.DataFrame, col: str, edges, labels) -> list:
         if stats is None:
             continue
         stats["bin"] = label
+        stats["roi_shrunk"] = _shrink(stats["roi"], stats["n"], prior)
         stats["bets_per_month"] = round(stats["n"] / months, 1)
         rows.append(stats)
     return rows
@@ -264,11 +287,16 @@ def build_evidence(
     min_odds: float = 1.0,
     max_odds: float = 1e9,
     league: str | None = None,
+    market: str = "All",
 ) -> dict:
-    df = load_settled(league=league)
+    df = load_settled(league=league, market=market)
     used, meta = apply_view(df, dedup, min_ev, max_ev, min_minutes, max_minutes, min_odds, max_odds)
     if league:
         meta["league"] = league
+    if market != "All":
+        meta["market"] = market
+    meta["floor"] = MARKET_FLOOR
+    meta["n_analyzable"] = len(used) >= MARKET_FLOOR
 
     months = _months_span(used)
     overall = None
@@ -281,7 +309,7 @@ def build_evidence(
             "roi": s["roi"],
             "ci_low": s["ci_low"],
             "ci_high": s["ci_high"],
-            "avg_clv": s["avg_clv"],
+            "expected_edge_clv": s["avg_clv"],  # CLV ≈ low-noise proxy for real edge
             "bets_per_month": round(s["n"] / months, 1),
             "months": round(months, 1),
         }
@@ -289,6 +317,7 @@ def build_evidence(
     result = {
         "meta": meta,
         "overall": overall,
+        "clv_coverage": _clv_coverage(used),
         "calibration": calibration(used),
         "correlations": correlations(used),
         "dimensions": {},
@@ -297,6 +326,15 @@ def build_evidence(
         result["dimensions"][key] = {"title": _title, "rows": table_by(used, col, edges, labels)}
 
     return result
+
+
+def _clv_coverage(df: pd.DataFrame) -> dict:
+    """Share of bets with a captured closing price (CLV is only defined there)."""
+    n = len(df)
+    if n == 0:
+        return {"pct": None, "with_closing": 0, "total": 0}
+    with_closing = int(df["clv_pct"].notna().sum())
+    return {"pct": round(100.0 * with_closing / n, 1), "with_closing": with_closing, "total": n}
 
 
 if __name__ == "__main__":
