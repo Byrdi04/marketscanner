@@ -66,6 +66,26 @@ def _shrink(roi: float, n: int, prior: float) -> float:
     return round(w * roi + (1 - w) * prior, 2)
 
 
+def _cluster_se(values, clusters, n: int) -> float:
+    """Cluster-robust (sandwich) standard error of a sample mean, clustered by
+    game. Within a game every logged bet shares the same outcome (mirror bets,
+    multiple lines, cross-market), so these observations are not independent;
+    this widens the CI by the design effect instead of counting them as such."""
+    if n <= 1:
+        return 0.0
+    c = np.asarray(clusters)
+    g = np.unique(c)
+    if g.size < 2:
+        return 0.0  # a single cluster carries no cross-cluster variance to measure
+    resid = np.asarray(values, dtype=float) - float(np.asarray(values, dtype=float).mean())
+    idx = c - c.min()
+    sums = np.zeros(int(idx.max()) + 1)
+    np.add.at(sums, idx.astype(int), resid)
+    var = float((sums ** 2).sum()) / (n * n)
+    var *= g.size / (g.size - 1)  # finite-sample correction
+    return math.sqrt(max(var, 0.0))
+
+
 def _bucket(series: pd.Series, edges, labels) -> pd.Series:
     """Bucket into (len(edges)+1) bins with labels."""
     bins = [-math.inf] + list(edges) + [math.inf]
@@ -158,6 +178,13 @@ def apply_view(
     ].copy()
     dropped_filters = before_filter - len(used)
 
+    # Game identity for cluster-robust CIs: every logged bet of a game shares the
+    # same outcome, so CIs must not treat them as independent observations.
+    if {"match_name", "commence_time"}.issubset(used.columns):
+        used["game_id"] = used.groupby(["match_name", "commence_time"], sort=False).ngroup()
+    else:
+        used["game_id"] = np.arange(len(used))
+
     return used, {
         "dedup": dedup,
         "total_logged": total_logged,
@@ -166,6 +193,10 @@ def apply_view(
         "n_duplicates_excluded": dropped_dupes,
         "n_filtered_out": dropped_filters,
         "n_used": len(used),
+        # Honest independence counts for transparency: a game may hold many rows
+        # but contributes only one independent outcome (per market).
+        "n_independent_games": int(used["game_id"].nunique()),
+        "n_game_markets": int(used.groupby(["game_id", "market_type"]).ngroups),
     }
 
 
@@ -182,7 +213,12 @@ def _roi_stats(group: pd.DataFrame) -> dict:
         return None
     profits = group["profit"].values
     roi = float(profits.mean() * 100.0)
-    ci_half = float(Z * (profits.std(ddof=1) / math.sqrt(n)) * 100.0) if n > 1 else 0.0
+    # Cluster-robust SE by game: rows within a game are not independent.
+    if n > 1 and "game_id" in group.columns and group["game_id"].nunique() > 1:
+        se = _cluster_se(profits, group["game_id"].values, n)
+    else:
+        se = profits.std(ddof=1) / math.sqrt(n) if n > 1 else 0.0
+    ci_half = float(Z * se * 100.0)
     wins = int(group["won"].sum())
     return {
         "n": n,
@@ -243,7 +279,11 @@ def calibration(df: pd.DataFrame) -> list:
         mid = (label.left + label.right) / 2
         n = len(g)
         win_rate = float(g["won"].mean() * 100.0)
-        ci_half = float(Z * math.sqrt((win_rate / 100.0) * (1 - win_rate / 100.0) / n) * 100.0)
+        if n > 1 and "game_id" in g.columns and g["game_id"].nunique() > 1:
+            se = _cluster_se(g["won"].values.astype(float), g["game_id"].values, n)
+        else:
+            se = math.sqrt((win_rate / 100.0) * (1 - win_rate / 100.0) / n)
+        ci_half = float(Z * se * 100.0)
         rows.append(
             {
                 "band": f"{label.left:.4f}–{label.right:.4f}",

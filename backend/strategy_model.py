@@ -16,7 +16,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from strategy_analysis import DB_NAME, load_settled, apply_view, _months_span, Z
+from strategy_analysis import DB_NAME, load_settled, apply_view, _months_span, _cluster_se, Z
 
 SKLEARN_AVAILABLE = False
 try:
@@ -56,10 +56,20 @@ def _add_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _walk_forward_assign(df: pd.DataFrame, n_folds: int = N_FOLDS) -> pd.DataFrame:
-    """Stamp each row with a chronological fold index 0..n_folds-1 (0 = oldest)."""
-    df = df.sort_values("timestamp").reset_index(drop=True)
-    df["fold"] = pd.qcut(np.arange(len(df)), n_folds, labels=False).astype(int)
-    return df
+    """Stamp each row with a chronological fold index 0..n_folds-1 (0 = oldest),
+    grouping by game so a game's rows never straddle the train/holdout boundary.
+    Folds are carved on the *games* (by commence_time), then mapped back to rows."""
+    df = df.copy()
+    if "game_id" not in df.columns:
+        df["game_id"] = df.groupby(["match_name", "commence_time"], sort=False).ngroup()
+    game_order = (
+        df.sort_values(["commence_time", "timestamp"])
+        .drop_duplicates("game_id")[["game_id"]]
+        .reset_index(drop=True)
+    )
+    k = min(n_folds, len(game_order))
+    game_order["fold"] = pd.qcut(np.arange(len(game_order)), k, labels=False).astype(int)
+    return df.merge(game_order, on="game_id", how="left")
 
 
 def _pick_folds(n: int, n_folds: int = N_FOLDS, min_holdout: int = 20, min_train: int = 40):
@@ -272,7 +282,11 @@ def build_sweep(
             if len(sub) < min_n:
                 continue
             roi = float(sub["profit"].mean() * 100.0)
-            ci = float(Z * sub["profit"].std(ddof=1) / math.sqrt(len(sub)) * 100.0) if len(sub) > 1 else 0.0
+            if len(sub) > 1 and "game_id" in sub.columns and sub["game_id"].nunique() > 1:
+                se = _cluster_se(sub["profit"].values, sub["game_id"].values, len(sub))
+            else:
+                se = sub["profit"].std(ddof=1) / math.sqrt(len(sub)) if len(sub) > 1 else 0.0
+            ci = float(Z * se * 100.0)
             rows.append({
                 "rule": f"EV ≥ {ev:g}% · T ≥ {h:g}h",
                 "min_ev": ev,
