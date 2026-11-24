@@ -2773,6 +2773,24 @@ NBA_TEAM_NAME_MAP = {
     # "Pinnacle/Danske name": "Official NBA API name",
 }
 
+# NCAA team name corrections: book (Pinnacle/Danske) spellings that the
+# automatic alias map (schools-index + recent scoreboards) doesn't cover, keyed
+# by the normalized match key and mapped onto the official NCAA seo slug. The
+# connector's set-comparison is exact, so without these the matched team never
+# resolves and the bet stays Pending even after the game is FINAL. Add entries
+# here if you encounter a "no finished game / keeping Pending" issue after a
+# game is clearly over.
+NCAA_TEAM_NAME_MAP = {
+    "usc": "southern-california",        # book "USC"; feed short is "Southern California"
+    "southern cal": "southern-california",
+    "middle tenn st": "middle-tenn",     # book "Middle Tenn St"; feed name is "Middle Tenn."
+    "middle tennessee": "middle-tenn",
+    "md eastern shore": "umes",          # MD Eastern Shore; feed slug/abbrev is "UMES"
+    "maryland eastern shore": "umes",
+    "tennessee martin": "ut-martin",     # book "Tennessee Martin"; feed is "UT Martin"
+    "tenn martin": "ut-martin",
+}
+
 # ---------------------------------------------------------
 # Per-league score connectors (ADR-0003)
 #
@@ -3040,7 +3058,12 @@ def _load_ncaa_slug_map():
 
 
 def _resolve_ncaa_team(name):
-    norm = _ncaa_map_key(name)
+    # Apply the manual override first (keyed by the normalized book spelling),
+    # then fall back to the automatic alias map. Only if neither resolves do we
+    # return the raw normalized name.
+    raw_key = _ncaa_map_key(name)
+    resolved = NCAA_TEAM_NAME_MAP.get(raw_key, name)
+    norm = _ncaa_map_key(resolved)
     if not norm:
         return norm
     return _ncaa_slug_map.get(norm, norm)
