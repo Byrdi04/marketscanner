@@ -17,6 +17,10 @@ When finished, tell the user:
 - `docker-compose.yml` at the repo root is the single source of truth; `deploy.sh` is the deploy procedure. Do not restate either in this file.
 - Backend container `market-scanner-backend` (FastAPI, port 8000); frontend container `market-scanner-frontend` (Next.js, port 3000).
 - Served through the npmplus reverse proxy on the shared `proxy-net` network. Persistent data lives **outside the repo** at `/opt/appdata/market-scanner/` (production SQLite `bets.db` + `.env`, mounted at container `/app/data`).
+
+### Where to read data (do not trust the repo copies)
+- **The production DB at `/opt/appdata/market-scanner/bets.db` is the ONLY authoritative data source.** Use it (read-only, e.g. `sqlite3 "file:/opt/appdata/market-scanner/bets.db?mode=ro"`) for any evaluation that inspects `paper_bets` / `notification_rules` / etc.
+- **Repo-local `*.db` files are stale and faulty leftovers and must be ignored:** `backend/bets.db` and `backend/data/bets.db` are old copies that do not match the production schema/data (missing the `league` column, predate multi-market collection). They are gitignored/untracked, so they never affect the running stack. Do not use them for analysis; treat them as non-existent (they may be deleted). The app reads only the mounted production volume.
 - Dependency changes (`backend/requirements.txt`, `frontend/package.json`) take effect on the next `./deploy.sh` rebuild.
 - Both containers run `TZ=Europe/Copenhagen`. Wall-clock logic in `backend/main.py` (the heartbeat scan gate and the 05:00 settlement cron) assumes local time; do not reinterpret these as UTC.
 - The automatic-scan window is not hardcoded: it reads `business_hours_start` / `business_hours_end` (default `7`/`23`, DB key-value store `notification_config`) and enforces both bounds, including overnight windows (start > end). Editable in Settings → Push Notifications → Active Scan Hours.
