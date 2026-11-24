@@ -1178,7 +1178,14 @@ def find_clv_for_paper_bet(bet_row):
     start time to estimate CLV. Scoped to the bet's league so NBA and NCAA
     closing-line snapshots are never interleaved.
     """
-    game_start = bet_row['commence_time']
+    # Normalize the bet's commence_time (stored as ISO-8601 with 'T' separator
+    # and a trailing 'Z', e.g. "2026-11-20T02:00:00Z") to the UTC format used by
+    # market_snapshots.timestamp (SQLite CURRENT_TIMESTAMP, "YYYY-MM-DD
+    # HH:MM:SS", also UTC). Both are UTC, so once the separators match the
+    # lexical comparison is chronologically correct. Without this, lexicographic
+    # ordering makes "T" (0x54) sort AFTER " " (0x20), so a post-game snapshot
+    # beats the pre-game one and CLV is resolved from a stale/absent game.
+    game_start = bet_row['commence_time'].replace('T', ' ').replace('Z', '')
     league = bet_row.get('league', 'NBA')
     league_conf = _league_by_name(league)
     strategy = league_conf.get("match_strategy") if league_conf else None
