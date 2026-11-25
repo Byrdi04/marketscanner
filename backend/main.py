@@ -82,13 +82,17 @@ def _scan_league(league):
         print(f"❌ {name} Scan: Danske Spil failed.")
         return 0
 
-    pinnacle = fetch_pinnacle_for_league(league, require_fresh=True)
+    pinnacle = fetch_pinnacle_for_league(league, require_fresh=True,
+                                         purpose=PURPOSE_BACKGROUND)
     if not pinnacle:
         print(f"⚠️ {name} Scan: no Pinnacle data.")
         return 0
 
     opportunities = run_analysis(danske, pinnacle)
     log_paper_bets(opportunities)
+
+    # Re-arm near-close pulses for any newly-logged paper bets tipping soon.
+    rearm_near_close_for_league(league["name"])
 
     # Only real-bet leagues nudge; paper-data leagues (NCAA) never notify.
     if league.get("notify", True):
@@ -98,11 +102,13 @@ def _scan_league(league):
     return len(opportunities)
 
 
-def fetch_pinnacle_for_league(league, require_fresh=True):
+def fetch_pinnacle_for_league(league, require_fresh=True, purpose=PURPOSE_BACKGROUND,
+                              deadline_grace=False):
     """Route the Pinnacle pull to the league's configured provider."""
     provider = league["pinnacle"].get("provider", "the_odds_api")
     if provider == "pinnapi":
-        return fetch_pinnapi_cached(league, require_fresh=require_fresh)
+        return fetch_pinnapi_cached(league, require_fresh=require_fresh,
+                                    purpose=purpose, deadline_grace=deadline_grace)
     return fetch_pinnacle_cached(require_fresh=require_fresh)
 
 # --- CONFIGURATION ---
@@ -208,83 +214,168 @@ def _danske_window(league):
 def _league_by_name(name):
     return next((l for l in LEAGUES if l["name"] == name), None)
 # ---------------------------------------------------------
-# CLV SNIPER LOGIC (Background Tasks)
+# NEAR-CLOSE CLV PULSE (Background Tasks, ADR-0005)
 # ---------------------------------------------------------
 
-def perform_clv_snapshot():
-    """
-    This function runs 10 minutes before game time.
-    It forces a paid API call to capture the Closing Line.
-    """
-    print(f"⏰ CLV SNIPER FIRED: Fetching fresh odds to capture CLV...")
-    
-    # 1. Force Fetch (Spend 1 Credit) — routed through the bet's league provider
-    # (NBA -> pinnapi, ADR-0004) so closing lines come from the same sharp feed
-    # bets are priced from. This is the only path that captures overnight
-    # closing lines outside the active-hours window.
-    nba_league = _league_by_name("NBA") or LEAGUES[0]
-    pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=True)
-    
-    # 2. Update Database
-    update_clv_for_placed_bets(pinnacle_data)
-    print("✅ CLV Snapshot Complete.")
-
-def schedule_clv_job(game_start_iso: str):
-    """
-    Schedules a job to run 10 minutes before the given game start time.
-    Uses the timestamp as the Job ID to prevent duplicate calls.
-    """
+def _parse_game_start(game_start_iso):
+    """Parse a game start (ISO with optional trailing 'Z') to an aware UTC
+    datetime. Returns None on failure / missing value."""
+    if not game_start_iso:
+        return None
     try:
-        # 1. Parse Time
-        # API times are usually UTC (Z). We handle them as UTC.
-        game_time = datetime.fromisoformat(game_start_iso.replace('Z', '+00:00'))
-        
-        # 2. Calculate Snapshot Time (10 mins before)
-        snapshot_time = game_time - timedelta(minutes=10)
-        
-        # If the time has already passed, don't schedule
-        if snapshot_time < datetime.now(pytz.utc):
-            print(f"⚠️ Game at {game_start_iso} is too soon/past to schedule CLV sniper.")
-            return
+        return datetime.fromisoformat(str(game_start_iso).replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
 
-        # 3. Schedule the Job
-        # ID is crucial: If we already have a job for this specific time,
-        # 'replace_existing=True' ensures we don't pay double.
-        job_id = f"clv_{game_start_iso}"
-        
-        scheduler.add_job(
-            perform_clv_snapshot,
-            'date',
-            run_date=snapshot_time,
-            id=job_id,
-            replace_existing=True
-        )
-        
-        print(f"🎯 CLV Sniper armed for: {snapshot_time} (Job ID: {job_id})")
-        
-    except Exception as e:
-        print(f"Error scheduling CLV job: {e}")
 
-def restore_clv_jobs():
+def perform_near_close_snapshot(league_name):
     """
-    On server startup, look at all Pending bets and re-arm the snipers.
+    Near-close CLV pulse (ADR-0005): one best-effort capture point per tracked
+    game near tip time. Runs with NO active-hours gate so overnight closing lines
+    are captured. Routes through the tracked game's league provider (NBA ->
+    pinnapi) so closing lines come from the same sharp feed bets are priced
+    from. Updates real-bet closing odds and saves a fresh league-scoped snapshot
+    (paper CLV resolves from the latest pre-game snapshot, so the near-close
+    snapshot is what paper bets read).
     """
-    print("re-arming CLV Snipers for pending bets...")
+    print(f"⏰ NEAR-CLOSE CLV PULSE: {league_name} — fetching fresh odds to capture CLV...")
+    league = _league_by_name(league_name) or LEAGUES[0]
+
+    # Deadline grace: if this game is within T-10 of tip, allow the pull even at
+    # the hard ceiling so the true closing line is still captured.
+    grace = False
+    for ts in _tracked_game_starts(league_name):
+        g = _parse_game_start(ts)
+        if g is None:
+            continue
+        mins_to_tip = (g - datetime.now(pytz.utc)).total_seconds() / 60
+        if 0 <= mins_to_tip <= NEAR_CLOSE_DEADLINE_GRACE_MINUTES:
+            grace = True
+            break
+
+    pinnacle_data = fetch_pinnacle_for_league(
+        league, require_fresh=True, purpose=PURPOSE_NEAR_CLOSE,
+        deadline_grace=grace)
+    # save_snapshot_to_db is already invoked inside fetch_pinnapi_cached when a
+    # fresh payload arrives; update pending real CLV from the same feed.
+    update_clv_for_placed_bets(pinnacle_data)
+    print("✅ Near-Close CLV Pulse Complete.")
+
+
+def _tracked_game_starts(league_name):
+    """Distinct game-start timestamps of all tracked (pending real + pending
+    paper) games for a league. Used to size deadline grace."""
+    starts = set()
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+    cursor.execute("SELECT game_starts_at FROM bets WHERE status = 'Pending'")
+    for row in cursor.fetchall():
+        if row['game_starts_at']:
+            starts.add(row['game_starts_at'])
+    cursor.execute("SELECT commence_time FROM paper_bets WHERE status = 'Pending' AND league = ?",
+                   (league_name,))
+    for row in cursor.fetchall():
+        if row['commence_time']:
+            starts.add(row['commence_time'])
+    conn.close()
+    return list(starts)
+
+
+def schedule_near_close_job(game_start_iso: str, league_name="NBA"):
+    """
+    Schedules a near-close job at T-NEAR_CLOSE_LEAD_MINUTES before the given
+    game start. Uses the timestamp as the Job ID to prevent duplicate calls.
+    Every job is league-tagged and coalesced by the shared 5-min governor, so
+    back-to-back games in a bloc resolve to a couple of pulls. Runs regardless
+    of active hours (overnight games are exactly why it exists).
+    """
+    game_time = _parse_game_start(game_start_iso)
+    if game_time is None:
+        return
+
+    snapshot_time = game_time - timedelta(minutes=NEAR_CLOSE_LEAD_MINUTES)
+    if snapshot_time < datetime.now(pytz.utc):
+        return
+
+    job_id = f"clv_{game_start_iso}"
+    scheduler.add_job(
+        perform_near_close_snapshot,
+        'date',
+        run_date=snapshot_time,
+        args=[league_name],
+        id=job_id,
+        replace_existing=True,
+    )
+    print(f"🎯 Near-Close pulse armed for: {snapshot_time} "
+          f"(Job ID: {job_id}, league: {league_name})")
+
+
+def restore_clv_jobs():
+    """
+    On server startup, re-arm near-close jobs for all pending real AND paper
+    bets that tip within the re-arm horizon.
+    """
+    print("re-arming Near-Close pulses for pending bets...")
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
     cursor.execute("SELECT DISTINCT game_starts_at FROM bets WHERE status = 'Pending'")
+    real_rows = cursor.fetchall()
+
+    cursor.execute(
+        "SELECT DISTINCT commence_time, league FROM paper_bets WHERE status = 'Pending'")
+    paper_rows = cursor.fetchall()
+    conn.close()
+
+    now = datetime.now(pytz.utc)
+    horizon = now + timedelta(minutes=NEAR_CLOSE_HORIZON_MINUTES)
+
+    count = 0
+    for row in real_rows:
+        gt = _parse_game_start(row['game_starts_at'])
+        if gt is None or not (now <= gt <= horizon):
+            continue
+        schedule_near_close_job(row['game_starts_at'], "NBA")
+        count += 1
+
+    for row in paper_rows:
+        gt = _parse_game_start(row['commence_time'])
+        if gt is None or not (now <= gt <= horizon):
+            continue
+        schedule_near_close_job(row['commence_time'], row['league'] or "NBA")
+        count += 1
+
+    print(f"Re-armed {count} Near-Close pulses within horizon.")
+
+
+def rearm_near_close_for_league(league_name):
+    """Re-arm near-close jobs for a single league's pending paper bets that tip
+    within the horizon (called after each league scan so newly-logged paper bets
+    get an armed closing-line capture without waiting for a restart)."""
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT DISTINCT commence_time FROM paper_bets WHERE status = 'Pending' AND league = ?",
+        (league_name,))
     rows = cursor.fetchall()
-    
+    conn.close()
+
+    now = datetime.now(pytz.utc)
+    horizon = now + timedelta(minutes=NEAR_CLOSE_HORIZON_MINUTES)
+
     count = 0
     for row in rows:
-        if row['game_starts_at']:
-            schedule_clv_job(row['game_starts_at'])
-            count += 1
-            
-    conn.close()
-    print(f"Re-armed {count} CLV jobs.")
+        gt = _parse_game_start(row['commence_time'])
+        if gt is None or not (now <= gt <= horizon):
+            continue
+        schedule_near_close_job(row['commence_time'], league_name)
+        count += 1
+    if count:
+        print(f"   Re-armed {count} Near-Close pulses for {league_name}.")
+
 
 # ---------------------------------------------------------
 # 1. DATA FETCHING: DANSKE SPIL (Free - No Cache Needed)
@@ -760,16 +851,46 @@ pinnapi_cache = {}
 # share the same sport_id/event_type, so the raw cache must not be per-league.
 pinnapi_raw_cache = {"last_updated": 0, "data": None}
 
-# Quota instrumentation + guard (ADR-0004): a persisted daily counter in the
-# notification_config KV store. Warn (ntfy) at 80; soft-cap (serve cache,
-# logged) at 85. The 85 cap is the fail-safe: a widened active-hours window or
-# extra force-scans degrade to cached lines, never onto pinnapi's 403 wall.
-PINNAPI_WARN_THRESHOLD = 80
-PINNAPI_SOFT_CAP = 85
+# Quota instrumentation + guard (ADR-0004, retuned ADR-0005): a persisted daily
+# counter in the notification_config KV store. Warn (ntfy) at 85; soft-cap
+# (serve cache, logged) at 95. Since ADR-0005 the soft-cap is purpose-aware:
+# near-close CLV pulls stay protected up to the hard ceiling, while background
+# and manual-refresh pulls degrade to cached lines first. The hard 100 is the
+# real pinnapi free-tier ceiling; degrading by purpose avoids its bare 403 wall.
+PINNAPI_WARN_THRESHOLD = 85
+PINNAPI_SOFT_CAP = 95
 PINNAPI_DAILY_CEILING = 100  # pinnapi free tier (~100 REST/day)
 PINNAPI_CADENCE_MINUTES = 15
 _PINNAPI_QUOTA_DATE_KEY = "pinnapi_quota_date"
 _PINNAPI_QUOTA_COUNT_KEY = "pinnapi_quota_count"
+
+# Purpose-aware freshness (ADR-0005): every puller declares a purpose and the
+# shared governor checks one persisted "last successful pull" clock against the
+# purpose's freshness window (seconds). Any successful pull resets that single
+# clock, so a manual refresh before a bet deliberately suppresses the next
+# background/near-close pull. Background scan stays at 15 min to conserve;
+# manual refresh and near-close capture use 5 min (only when truly stale).
+PURPOSE_BACKGROUND = "background"   # 15-min heartbeat / force-scan
+PURPOSE_MANUAL = "manual"           # explicit UI refresh before betting
+PURPOSE_NEAR_CLOSE = "near_close"   # closing-line capture near tip time
+FRESHNESS_SECONDS = {
+    PURPOSE_BACKGROUND: 15 * 60,   # 900s — conserve
+    PURPOSE_MANUAL: 5 * 60,        # 300s — near-real-time when you ask
+    PURPOSE_NEAR_CLOSE: 5 * 60,    # 300s — dense near-close, coalesced
+}
+
+# Near-close closing-line pulse (ADR-0005): one best-effort capture point per
+# tracked game at T-30 before tip, no active-hours gate (it must run overnight),
+# coalesced by the shared 5-min governor. T-10 deadline grace stays protected
+# even past the soft-cap, up to the hard ceiling.
+NEAR_CLOSE_LEAD_MINUTES = 30
+NEAR_CLOSE_HORIZON_MINUTES = 6 * 60  # re-arm jobs for games tipping within 6h
+NEAR_CLOSE_DEADLINE_GRACE_MINUTES = 10
+
+# Persisted shared pull clock (ADR-0005) so a restart inside a fresh window is
+# pull-neutral. Stored per-date alongside the quota counter.
+_PULL_CLOCK_KEY = "clv_last_pull_ts"       # shared clock: epoch of last raw pull
+_PULL_CLOCK_DATE_KEY = "clv_last_pull_date"  # date it belongs to (rolls daily)
 
 # Remaining-quota headers pinnapi may return on the markets response; read them
 # instead of the local counter when present (probed at startup, ADR-0004).
@@ -815,6 +936,45 @@ def _pinnapi_quota_increment():
         _PINNAPI_QUOTA_COUNT_KEY: str(count),
     })
     return count
+
+
+# --- Shared pull clock (ADR-0005) ---
+# One persisted epoch timestamp, rolled daily, drives every purpose's freshness
+# decision so a restart inside a fresh window is pull-neutral.
+
+def _pull_clock():
+    """Epoch of the last successful raw pull (today's roll), else 0."""
+    cfg = load_notification_config()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if cfg.get(_PULL_CLOCK_DATE_KEY) != today:
+        return 0
+    try:
+        return float(cfg.get(_PULL_CLOCK_KEY, "0") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _set_pull_clock(ts):
+    cfg = load_notification_config()
+    cfg[_PULL_CLOCK_DATE_KEY] = datetime.now().strftime("%Y-%m-%d")
+    cfg[_PULL_CLOCK_KEY] = str(ts)
+    save_notification_config(cfg)
+
+
+def _seconds_since_last_pull():
+    now = time.time()
+    last = _pull_clock()
+    if last <= 0:
+        return float("inf")
+    return now - last
+
+
+def _next_scan_eta():
+    """Epoch of the next time a BACKGROUND pull can fire (freshness fully
+    elapsed), for surfacing 'next scan' in the UI. 0 when instantly due."""
+    freshness = FRESHNESS_SECONDS[PURPOSE_BACKGROUND]
+    remaining = freshness - _seconds_since_last_pull()
+    return int(time.time() + max(0.0, remaining))
 
 
 def _pinnapi_daily_budget():
@@ -872,11 +1032,21 @@ def _warn_pinnapi_quota(count):
     print(f"🟠 pinnapi quota warning: {count} pulls today (soft-cap {PINNAPI_SOFT_CAP}).")
 
 
-def _pinnapi_fetch_raw(league):
-    """Fetch the raw pinnapi /kit/v1/markets payload shared across leagues.
+def _pinnapi_fetch_raw(league, purpose=PURPOSE_BACKGROUND, deadline_grace=False):
+    """Purpose-aware pull governor (ADR-0005).
 
+    Every puller routes through here and declares a `purpose`. One shared
+    persisted "last successful pull" epoch clock gates every request against the
+    purpose's freshness window; any successful pull resets that single clock (so
+    a manual refresh before a bet suppresses the next background/near-close pull).
     sport_id=3 already contains NBA + NCAA, so ONE HTTP request serves every
     pinnapi league; the daily quota counter increments once per request.
+
+    Purpose-aware soft-cap: near-close pulls stay protected past the soft-cap up
+    to the hard ceiling, while background and manual pulls degrade to cached
+    lines past PINNAPI_SOFT_CAP. `deadline_grace` (a tracked game within T-10 of
+    tip) allows the near-close pull even at/past the hard ceiling — the fail-safe
+    to capture a true closing line, risking at most one 403. Never otherwise.
 
     Returns (payload, pulled, raw_ts):
       payload  — the raw JSON payload, or None when the pull failed / key unset
@@ -886,23 +1056,34 @@ def _pinnapi_fetch_raw(league):
     global pinnapi_raw_cache
     now = time.time()
 
-    # Shared-cache reuse: a pull within CACHE_DURATION (900s ≈ one 15-min
-    # heartbeat) serves every league without a second HTTP request.
-    if pinnapi_raw_cache["data"] is not None and \
-            (now - pinnapi_raw_cache["last_updated"] < CACHE_DURATION):
-        return pinnapi_raw_cache["data"], False, pinnapi_raw_cache["last_updated"]
+    # Shared-clock freshness: only pull when the persisted clock is older than
+    # this purpose's freshness window. Falls back to the in-memory cache so
+    # back-to-back callers inside the window never double-pull.
+    freshness = FRESHNESS_SECONDS.get(purpose, FRESHNESS_SECONDS[PURPOSE_BACKGROUND])
+    if _seconds_since_last_pull() < freshness:
+        cached = pinnapi_raw_cache["data"]
+        if cached is not None:
+            return cached, False, pinnapi_raw_cache["last_updated"]
 
     if not PINNAPI_KEY:
         print("⚠️ PINNAPI_KEY not set; skipping pinnapi fetch.")
         return None, False, 0
 
-    # Daily soft-cap: beyond 85 pulls/day serve cached lines (logged) instead
-    # of pulling — a widened window or extra force-scans degrade here by design,
-    # never onto pinnapi's bare 403 wall.
-    if _pinnapi_quota_count() >= PINNAPI_SOFT_CAP:
-        print(f"🛑 pinnapi soft-cap reached ({_pinnapi_quota_count()}/day): "
-              f"serving cached lines instead of a new pull.")
-        return pinnapi_raw_cache["data"], False, pinnapi_raw_cache["last_updated"]
+    count = _pinnapi_quota_count()
+    over_soft_cap = count >= PINNAPI_SOFT_CAP
+    at_or_over_ceiling = count >= PINNAPI_DAILY_CEILING
+    if over_soft_cap or at_or_over_ceiling:
+        # Purpose-aware gate: near-close is highest-value. Background/manual
+        # always degrade. Near-close degrades only when at the hard ceiling
+        # (unless deadline grace — always allowed). Serve cached lines.
+        allow_pull = purpose == PURPOSE_NEAR_CLOSE and (
+            not at_or_over_ceiling or deadline_grace
+        )
+        if not allow_pull:
+            print(f"🛑 pinnapi quota reached ({count}/day, purpose={purpose}, "
+                  f"grace={deadline_grace}): serving cached lines instead of a "
+                  f"new pull.")
+            return pinnapi_raw_cache["data"], False, pinnapi_raw_cache["last_updated"]
 
     pconf = league["pinnacle"]
     url = f"{PINNAPI_BASE}/kit/v1/markets"
@@ -921,18 +1102,24 @@ def _pinnapi_fetch_raw(league):
 
     _capture_pinnapi_quota_headers(resp.headers)
     prev = _pinnapi_quota_count()
-    count = _pinnapi_quota_increment()
-    if prev < PINNAPI_WARN_THRESHOLD <= count:
-        _warn_pinnapi_quota(count)
+    new_count = _pinnapi_quota_increment()
+    if prev < PINNAPI_WARN_THRESHOLD <= new_count:
+        _warn_pinnapi_quota(new_count)
     pinnapi_raw_cache = {"last_updated": now, "data": payload}
+    _set_pull_clock(now)
     return payload, True, now
 
 
-def fetch_pinnapi_cached(league, require_fresh=True):
+def fetch_pinnapi_cached(league, require_fresh=True, purpose=PURPOSE_BACKGROUND,
+                         deadline_grace=False):
     """Fetch prematch markets for a league from pinnapi and normalize to the
     The Odds API event shape. Every new raw payload saves a league-stamped
     snapshot (gated on the shared raw payload's timestamp, so NBA and NCAA both
     get 15-min CLV granularity from the single per-heartbeat pull).
+
+    `purpose` (background/manual/near_close, ADR-0005) controls the shared-clock
+    freshness the request must satisfy and how the quota soft-cap applies.
+    `deadline_grace` lets a near-close pull cross the hard ceiling.
 
     Failure split by betting league (ADR-0004): a fresh-fetch failure on a
     real-bet league (notify=True) ABORTS the scan — returns empty and logs
@@ -947,7 +1134,8 @@ def fetch_pinnapi_cached(league, require_fresh=True):
     if not require_fresh and cached and cached["data"]:
         return cached["data"]
 
-    raw, pulled, raw_ts = _pinnapi_fetch_raw(league)
+    raw, pulled, raw_ts = _pinnapi_fetch_raw(
+        league, purpose=purpose, deadline_grace=deadline_grace)
     if raw is None:
         if league.get("notify", True):
             print(f"🚨 {league['name']} (real-bet league): fresh pinnapi pull "
@@ -2134,9 +2322,12 @@ def get_opportunities(refresh: bool = False):
 
     # 1. Get Data
     danske_data = fetch_danske_spil(nba_league)
-    # If refresh=True, we ask for fresh data (checks timer).
-    # If refresh=False, we accept whatever is in memory.
-    pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=refresh)
+    # If refresh=True, we ask for fresh data (checks the shared-clock timer).
+    # If refresh=False, we accept whatever is in memory. Manual refreshes use
+    # PURPOSE_MANUAL (5-min freshness) so you get near-real-time lines when you
+    # explicitly refresh, while the same pull resets the shared clock.
+    pinnacle_data = fetch_pinnacle_for_league(
+        nba_league, require_fresh=refresh, purpose=PURPOSE_MANUAL)
     
     if not danske_data: # If Danske fails, we can't do anything
         return {"message": "Error fetching Danske Spil", "data": []}
@@ -2144,7 +2335,8 @@ def get_opportunities(refresh: bool = False):
     # If we have no Pinnacle data at all (first run), we might return empty
     if not pinnacle_data:
         # Optional: Force fetch if it's the very first run ever
-        pinnacle_data = fetch_pinnacle_for_league(nba_league, require_fresh=True)
+        pinnacle_data = fetch_pinnacle_for_league(
+            nba_league, require_fresh=True, purpose=PURPOSE_MANUAL)
 
     # ... piggyback update ...
     update_clv_for_placed_bets(pinnacle_data)
@@ -2157,6 +2349,10 @@ def get_opportunities(refresh: bool = False):
         "timestamp": datetime.now().isoformat(),
         "pinnacle_age": pinnapi_raw_cache["last_updated"],
         "quota_remaining": _pinnapi_remaining_quota(),
+        "quota_used": _pinnapi_quota_count(),
+        "soft_cap": PINNAPI_SOFT_CAP,
+        "ceiling": PINNAPI_DAILY_CEILING,
+        "next_scan_eta": _next_scan_eta(),
         "count": len(opportunities),
         "data": opportunities
     }
@@ -2192,9 +2388,10 @@ def place_bet(bet: BetRequest):
         conn.commit()
         conn.close()
 
-        # --- ARM THE SNIPER ---
+        # --- ARM THE NEAR-CLOSE PULSE ---
+        # Real bets are NBA (notify=True); arm the closing-line job for this game.
         if final_time:
-            schedule_clv_job(final_time)
+            schedule_near_close_job(final_time, "NBA")
         return {"message": "Bet placed successfully"}
     except Exception as e:
         print(f"Error placing bet: {e}")

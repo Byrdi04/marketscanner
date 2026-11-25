@@ -32,6 +32,10 @@ interface ApiResponse {
   timestamp: string;
   pinnacle_age: number;
   quota_remaining: string;
+  quota_used: number;
+  soft_cap: number;
+  ceiling: number;
+  next_scan_eta: number;
   count: number;
   data: Opportunity[];
 }
@@ -49,6 +53,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [quota, setQuota] = useState<string>("?");
+  const [quotaUsed, setQuotaUsed] = useState<number | null>(null);
+  const [softCap, setSoftCap] = useState<number | null>(null);
+  const [nextScanEta, setNextScanEta] = useState<number | null>(null);
   const [dataAge, setDataAge] = useState<number>(0); // Unix timestamp from backend
   
   // UI STATE
@@ -77,6 +84,9 @@ export default function Home() {
       setLastUpdated(new Date(json.timestamp).toLocaleTimeString());
       setDataAge(json.pinnacle_age);
       setQuota(json.quota_remaining);
+      setQuotaUsed(json.quota_used ?? null);
+      setSoftCap(json.soft_cap ?? null);
+      setNextScanEta(json.next_scan_eta ?? null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -276,7 +286,16 @@ export default function Home() {
 
             <div className="flex flex-col items-start gap-1 text-right text-xs text-slate-400 sm:items-end">
               <span>Updated: {lastUpdated || "-"}</span>
-              <span className="font-mono">API Credits: {quota}</span>
+              <span className="font-mono">
+                API Credits: {quotaUsed !== null && softCap !== null
+                  ? `${quotaUsed}/${softCap}`
+                  : quota}
+              </span>
+              {nextScanEta && (
+                <span className="font-mono">
+                  Next scan: {new Date(nextScanEta * 1000).toLocaleTimeString()}
+                </span>
+              )}
 
               {/* STALENESS INDICATOR */}
               <span className="flex items-center gap-2">
