@@ -102,9 +102,13 @@ def _scan_league(league):
     return len(opportunities)
 
 
-def fetch_pinnacle_for_league(league, require_fresh=True, purpose=PURPOSE_BACKGROUND,
+def fetch_pinnacle_for_league(league, require_fresh=True, purpose=None,
                               deadline_grace=False):
     """Route the Pinnacle pull to the league's configured provider."""
+    # PURPOSE_* constants are defined later in the module; default lazily here
+    # (None -> background) so def-time never references a not-yet-bound name.
+    if purpose is None:
+        purpose = PURPOSE_BACKGROUND
     provider = league["pinnacle"].get("provider", "the_odds_api")
     if provider == "pinnapi":
         return fetch_pinnapi_cached(league, require_fresh=require_fresh,
