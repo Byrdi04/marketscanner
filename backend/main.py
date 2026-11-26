@@ -586,7 +586,7 @@ def save_notification_rules(rules):
                 rule.get("name"),
                 rule["enabled"],
                 float(rule["min_ev"]),
-                float(rule.get("max_ev", 10.0)),
+                float(rule.get("max_ev", 100.0)),
                 float(rule["min_odds"]),
                 float(rule["max_odds"]),
                 market_types,
@@ -1876,7 +1876,7 @@ def init_db():
             name TEXT,
             enabled TEXT DEFAULT 'false',
             min_ev REAL DEFAULT 3.5,
-            max_ev REAL DEFAULT 10.0,
+            max_ev REAL DEFAULT 100.0,
             min_odds REAL DEFAULT 1.60,
             max_odds REAL DEFAULT 2.50,
             market_types TEXT DEFAULT 'Spread,Total,MoneyLine',
@@ -1926,6 +1926,9 @@ def init_db():
     # Migration: Add shared-rule columns (name, max_ev) if missing
     _migrate_add_rule_columns()
 
+    # Migration: Lift the legacy 10% max_ev cap on existing rules
+    _migrate_raise_ev_cap()
+
 def _migrate_add_league_column():
     """Add league column to paper_bets if it doesn't exist yet."""
     try:
@@ -1970,13 +1973,29 @@ def _migrate_add_rule_columns():
             cursor.execute("ALTER TABLE notification_rules ADD COLUMN max_ev REAL")
             changed = True
         # Backfill existing rows so max_ev is never NULL (legacy rules)
-        cursor.execute("UPDATE notification_rules SET max_ev = ? WHERE max_ev IS NULL", (10.0,))
+        cursor.execute("UPDATE notification_rules SET max_ev = ? WHERE max_ev IS NULL", (100.0,))
         if changed:
             print("✅ Migration: Added rule columns (name, max_ev).")
         conn.commit()
         conn.close()
     except sqlite3.OperationalError:
         pass
+
+def _migrate_raise_ev_cap():
+    """Lift the legacy hard 10% max_ev cap on saved notification rules.
+
+    The cap was a holdover from a more cautious approach; the user is now
+    adequately informed about mispricing risk, and legitimate high-swing
+    opportunities (notably NCAA) were being filtered out. Raises any rule
+    still capped at 10% to an effectively unbounded 100%."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notification_rules SET max_ev = 100.0 WHERE max_ev <= 10.0")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Warning: max_ev cap migration skipped ({e}).")
 
 def migrate_to_rules():
     """
@@ -2015,7 +2034,7 @@ def migrate_to_rules():
         None,
         'true',
         float(old_config.get('min_ev', '3.5')),
-        10.0,
+        100.0,
         float(old_config.get('min_odds', '1.60')),
         float(old_config.get('max_odds', '2.50')),
         old_config.get('market_types', 'Spread,Total,MoneyLine'),
@@ -2033,7 +2052,7 @@ def migrate_to_rules():
         None,
         'false',
         5.0,
-        10.0,
+        100.0,
         1.60,
         2.50,
         'Spread,Total,MoneyLine',
@@ -2325,7 +2344,7 @@ class NotificationRule(BaseModel):
     name: Optional[str] = None
     enabled: bool
     min_ev: float
-    max_ev: float = 10.0
+    max_ev: float = 100.0
     min_odds: float
     max_odds: float
     market_types: list[str]

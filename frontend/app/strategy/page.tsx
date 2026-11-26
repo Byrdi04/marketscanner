@@ -163,7 +163,7 @@ export default function StrategyPage() {
   const [league, setLeague] = useState<string>("NCAA");
   const [market, setMarket] = useState<string>("All");
   const [minEv, setMinEv] = useState(0);
-  const [maxEv, setMaxEv] = useState(10);
+  const [maxEv, setMaxEv] = useState(RULE_EV_MAX);
   const [minHours, setMinHours] = useState(0);
   const [maxHours, setMaxHours] = useState(23);
   const [minOdds, setMinOdds] = useState(1.9);

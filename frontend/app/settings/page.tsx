@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { StrategyRule, DEFAULT_RULE_VALUES, normalizeRule } from "../rules";
+import { StrategyRule, DEFAULT_RULE_VALUES, normalizeRule, RULE_EV_MIN, RULE_EV_MAX } from "../rules";
 
 interface GlobalConfig {
   enabled: boolean;
@@ -359,8 +359,8 @@ export default function Settings() {
           </label>
           <input
             type="range"
-            min="0"
-            max="10"
+            min={RULE_EV_MIN}
+            max={RULE_EV_MAX}
             step="0.5"
             value={rule.min_ev}
             onChange={(e) =>
@@ -369,8 +369,8 @@ export default function Settings() {
             className="w-full cursor-pointer accent-emerald-500"
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
-            <span>0%</span>
-            <span>10%</span>
+            <span>{RULE_EV_MIN}%</span>
+            <span>{RULE_EV_MAX}%</span>
           </div>
         </div>
 
@@ -381,8 +381,8 @@ export default function Settings() {
           </label>
           <input
             type="range"
-            min="0"
-            max="10"
+            min={RULE_EV_MIN}
+            max={RULE_EV_MAX}
             step="0.5"
             value={rule.max_ev}
             onChange={(e) =>
@@ -391,8 +391,8 @@ export default function Settings() {
             className="w-full cursor-pointer accent-emerald-500"
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
-            <span>0%</span>
-            <span>10%</span>
+            <span>{RULE_EV_MIN}%</span>
+            <span>{RULE_EV_MAX}%</span>
           </div>
         </div>
 

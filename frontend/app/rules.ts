@@ -18,7 +18,7 @@ export interface StrategyRule {
 
 /* Range bounds used by both pages' EV / time controls */
 export const RULE_EV_MIN = 0;
-export const RULE_EV_MAX = 10;
+export const RULE_EV_MAX = 100;
 export const RULE_HOUR_MIN = 0;
 export const RULE_HOUR_MAX = 23;
 export const ALL_MARKET_TYPES = ["Spread", "Total", "MoneyLine"];
