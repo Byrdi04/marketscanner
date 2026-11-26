@@ -194,6 +194,29 @@ LEAGUES = [
         "score_source": "ncaa",         # per-league NCAA score connector (ADR-0003)
         "notify": False,                # data-gathering only — no bet nudges
     },
+    {
+        "name": "EuroLeague",
+        "danske": {
+            "tag": "23192",
+            "window": "fixed",          # full-season window
+            "start": "2026-10-01 00:00:00",
+            "end": "2027-06-30 23:59:59",
+            "max_events": 64,
+            "exclusions": [],
+        },
+        "pinnacle": {
+            "provider": "pinnapi",      # replacement sharp-odds feed
+            "sport_id": 3,              # basketball (includes NBA + NCAA + EuroLeague)
+            "event_type": "prematch",
+            # pinnapi does not enumerate league labels; tune this allowlist
+            # from the one-time distinct-league_name logger output.
+            "league_name_allowlist": ["Europe - Euroleague"],
+            "markets": ["money_line", "spread", "total"],
+        },
+        "match_strategy": "full_string",
+        "score_source": "euroleague",   # per-league EuroLeague score connector (ADR-0006)
+        "notify": False,                # paper-data-only — no bet nudges (same as NCAA)
+    },
 ]
 
 NCAA_MATCH_THRESHOLD = 90
@@ -2999,6 +3022,57 @@ NCAA_TEAM_NAME_MAP = {
     "tenn martin": "ut-martin",
 }
 
+# EuroLeague team-name corrections: book (Pinnacle/Danske) spellings that
+# differ from the official api-live.euroleague.net /v1/results feed, keyed by
+# the normalized match key and mapped onto the official feed team string
+# (UPPERCASE). The connector's set-comparison is exact, so without these the
+# matched team never resolves (e.g. Hapoel appears as "HAPOEL IBI TEL AVIV" on
+# the feed vs "Hapoel Tel Aviv" at the books) and the bet stays Pending even
+# after the game is final. Add entries here for "no finished game / keeping
+# Pending" cases after a game is clearly over. The 2026-27 field is 20 clubs.
+EURO_LEAGUE_TEAM_NAME_MAP = {
+    # "Danske/Pinnacle name": "Official EuroLeague feed team string"
+    "anadolu efes istanbul": "ANADOLU EFES ISTANBUL",
+    "anadolu efes": "ANADOLU EFES ISTANBUL",
+    "efes": "ANADOLU EFES ISTANBUL",
+    "olympia milan": "ARMANI OLIMPIA MILAN",
+    "milan": "ARMANI OLIMPIA MILAN",
+    "besiktas istanbul": "BESIKTAS FUZUL ISTANBUL",
+    "besiktas": "BESIKTAS FUZUL ISTANBUL",
+    "red star belgrade": "CRVENA ZVEZDA MERIDIANBET BELGRADE",
+    "crvena zvezda": "CRVENA ZVEZDA MERIDIANBET BELGRADE",
+    "red star": "CRVENA ZVEZDA MERIDIANBET BELGRADE",
+    "dubai basketball": "DUBAI BASKETBALL",
+    "barcelona": "FC BARCELONA",
+    "fc barcelona": "FC BARCELONA",
+    "bayern munich": "FC BAYERN MUNICH",
+    "fc bayern munich": "FC BAYERN MUNICH",
+    "fenerbahce istanbul": "FENERBAHCE TARFIN ISTANBUL",
+    "fenerbahce": "FENERBAHCE TARFIN ISTANBUL",
+    "hapoel tel aviv": "HAPOEL IBI TEL AVIV",
+    "hapoel ibi tel aviv": "HAPOEL IBI TEL AVIV",
+    "baskonia vitoria": "KOSNER BASKONIA VITORIA-GASTEIZ",
+    "saski baskonja": "KOSNER BASKONIA VITORIA-GASTEIZ",
+    "kirolbet basconia": "KOSNER BASKONIA VITORIA-GASTEIZ",
+    "asvel villeurbanne": "LDLC ASVEL VILLEURBANNE",
+    "ldlc asvel": "LDLC ASVEL VILLEURBANNE",
+    "asvel": "LDLC ASVEL VILLEURBANNE",
+    "maccabi tel aviv": "MACCABI RAPYD TEL AVIV",
+    "maccabi rapyd tel aviv": "MACCABI RAPYD TEL AVIV",
+    "olympiacos piraeus": "OLYMPIACOS PIRAEUS",
+    "olympiacos": "OLYMPIACOS PIRAEUS",
+    "panathinaikos athens": "PANATHINAIKOS AKTOR ATHENS",
+    "panathinaikos": "PANATHINAIKOS AKTOR ATHENS",
+    "paris basketball": "PARIS BASKETBALL",
+    "partizan belgrade": "PARTIZAN MOZZART BET BELGRADE",
+    "partizan": "PARTIZAN MOZZART BET BELGRADE",
+    "real madrid": "REAL MADRID",
+    "valencia basket": "VALENCIA BASKET",
+    "virtus bologna": "VIRTUS BOLOGNA",
+    "zalgiris kaunas": "ZALGIRIS KAUNAS",
+    "zalgiris": "ZALGIRIS KAUNAS",
+}
+
 # ---------------------------------------------------------
 # Per-league score connectors (ADR-0003)
 #
@@ -3032,13 +3106,16 @@ _ncaa_scoreboard_cache = {}  # (Y, M, D) -> validated games | None
 _ncaa_slug_map = None        # NCAA normalized alias -> slug key (stable across runs)
 _slug_reload_after = 0.0     # epoch after which an empty/failed slug map may be reloaded
 _SLUG_RETRY_SECONDS = 120.0  # backoff before retrying a failed schools-index load
+_euroleague_results_cache = None  # list of parsed EuroLeague results XML games | [] on failure
 
 
 def _reset_settlement_caches():
     global _nba_day_cache, _nba_odds_cache, _ncaa_scoreboard_cache
+    global _euroleague_results_cache
     _nba_day_cache = {}
     _nba_odds_cache = None
     _ncaa_scoreboard_cache = {}
+    _euroleague_results_cache = None
 
 
 def _score_source_for_league(league):
@@ -3046,8 +3123,13 @@ def _score_source_for_league(league):
     source = conf.get("score_source") if conf else None
     if source:
         return source
-    # Conservative default: NCAA has one connector today; everything else NBA.
-    return "ncaa" if league == "NCAA" else "nba"
+    # Conservative default: NCAA and EuroLeague have their own connectors today;
+    # everything else NBA.
+    if league == "NCAA":
+        return "ncaa"
+    if league == "EuroLeague":
+        return "euroleague"
+    return "nba"
 
 
 def _split_match_name(match_name):
@@ -3526,12 +3608,159 @@ def _nba_connector(home, away, commence_time):
 
 
 # ------------------------------------------------------------------
+# EuroLeague score connector (score_source: "euroleague")
+# ------------------------------------------------------------------
+
+# Official EuroLeague results endpoint, no auth. `seasonCode` names the current
+# season (E2026 = 2026-27); past seasons (e.g. E2025) hold last year's finished
+# slate and would never turn up a final score for a live bet.
+EUROLEAGUE_RESULTS_URL = os.getenv(
+    "EUROLEAGUE_RESULTS_URL",
+    "https://api-live.euroleague.net/v1/results?seasonCode=E2026",
+)
+EUROLEAGUE_MATCH_TOLERANCE_HOURS = 6
+EUROLEAGUE_TZ = pytz.timezone("Europe/Copenhagen")
+
+# Sentinel for a results payload whose game blocks diverge from the expected
+# shape (schema drift). The connector treats it as "no score, keep Pending"
+# rather than guessing, mirroring the NCAA contract-validator behaviour.
+EUROLEAGUE_SCHEMA_ERROR = "euroleague schema drift"
+
+
+def _resolve_euroleague_team(name):
+    """Map a book (Danske/Pinnacle) spelling to the official feed string, then
+    normalize for exact set-comparison."""
+    official = EURO_LEAGUE_TEAM_NAME_MAP.get(normalize_team_name(name), name)
+    return normalize_team_name(official)
+
+
+def _fetch_euroleague_results():
+    """Fetch and parse the full-season EuroLeague results XML, cached once per
+    settlement run. Returns a list of game dicts; [] on any failure."""
+    global _euroleague_results_cache
+    if _euroleague_results_cache is not None:
+        return _euroleague_results_cache
+    try:
+        resp = requests.get(EUROLEAGUE_RESULTS_URL, timeout=20)
+        resp.raise_for_status()
+        root = _parse_euroleague_results(resp.content)
+        _euroleague_results_cache = root
+        return root
+    except Exception as e:
+        print(f"❌ EuroLeague results fetch/parse failed ({EUROLEAGUE_RESULTS_URL}): {e}")
+        # Cache the failure so a flaky endpoint isn't hammered per bet this run;
+        # fresh caches next run retry it.
+        _euroleague_results_cache = []
+        return []
+
+
+def _parse_euroleague_results(xml_bytes):
+    """Parse the /v1/results XML into game dicts keyed by official feed team
+    names, final-only. Raises on schema drift (missing <game> blocks, or a
+    required field absent) so the caller keeps bets Pending rather than
+    silently misgrading."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_bytes)
+    games = []
+    for game in root.findall("game"):
+        home = _text_of(game, "hometeam")
+        away = _text_of(game, "awayteam")
+        homescore = _text_of(game, "homescore")
+        awayscore = _text_of(game, "awayscore")
+        played = _text_of(game, "played")
+        date = _text_of(game, "date")
+        time = _text_of(game, "time")
+        if not all([home, away, homescore, awayscore, played, date, time]):
+            raise ValueError(EUROLEAGUE_SCHEMA_ERROR)
+        if str(played).strip().lower() != "true":
+            continue  # not final yet; do not grade
+        hs = _to_int(homescore)
+        as_s = _to_int(awayscore)
+        if hs is None or as_s is None:
+            raise ValueError(EUROLEAGUE_SCHEMA_ERROR)
+        games.append({
+            "home_key": _resolve_euroleague_team(home),
+            "away_key": _resolve_euroleague_team(away),
+            "home_score": hs,
+            "away_score": as_s,
+            "start_epoch": _euroleague_start_epoch(date, time),
+        })
+    return games
+
+
+def _text_of(game, tag):
+    el = game.find(tag)
+    return el.text.strip() if el is not None and el.text and el.text.strip() else ""
+
+
+def _euroleague_start_epoch(date_str, time_str):
+    """Feed date+time ('Nov 19, 2026' + '20:45') localised to Europe/Copenhagen
+    and converted to a UTC epoch. Returns None if unparseable."""
+    try:
+        naive = datetime.strptime(
+            f"{date_str.strip()} {time_str.strip()}", "%b %d, %Y %H:%M"
+        )
+        return int(EUROLEAGUE_TZ.localize(naive).timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def _euroleague_connector(home, away, commence_time):
+    """Return the FINAL score for the one specific EuroLeague game on the bet's
+    day, or None (stay Pending). The EuroLeague feed has no canceled/postponed
+    concept — a game that never turns played=true simply never matches, so the
+    bet stays Pending rather than being surfaced as a manual review."""
+    bet_epoch = _commence_epoch(commence_time)
+    if bet_epoch is None:
+        print(f"⚠️ EuroLeague: cannot parse commence_time {commence_time!r} for {home} vs {away}; keeping Pending")
+        return None
+
+    games = _fetch_euroleague_results()
+    if not games:
+        print(f"⚠️ EuroLeague: no results for {home} vs {away} (started {bet_epoch}); keeping Pending")
+        return None
+
+    bet_home_key = _resolve_euroleague_team(home)
+    bet_away_key = _resolve_euroleague_team(away)
+
+    finals = []
+    for g in games:
+        if {g["home_key"], g["away_key"]} != {bet_home_key, bet_away_key}:
+            continue
+        start_epoch = g.get("start_epoch")
+        if start_epoch is not None and abs(start_epoch - bet_epoch) > EUROLEAGUE_MATCH_TOLERANCE_HOURS * 3600:
+            continue  # outside the ±6h start-time window
+        finals.append(g)
+
+    if not finals:
+        print(f"🔎 EuroLeague: no finished game for {home} vs {away} (started {bet_epoch}); keeping Pending")
+        return None
+    if len(finals) > 1:
+        print(f"⚠️ EuroLeague: {len(finals)} finished games match {home} vs {away} (started {bet_epoch}); ambiguous, keeping Pending")
+        return None
+
+    g = finals[0]
+    if g["home_key"] == bet_home_key:
+        return {
+            "home_team": home, "away_team": away,
+            "home_score": g["home_score"], "away_score": g["away_score"],
+        }
+    return {
+        "home_team": home, "away_team": away,
+        "home_score": g["away_score"], "away_score": g["home_score"],
+    }
+
+
+# ------------------------------------------------------------------
 # Connector dispatch + grading
 # ------------------------------------------------------------------
 
 def _connector_get_score(score_source, home, away, commence_time):
     if score_source == "ncaa":
         return _ncaa_connector(home, away, commence_time)
+    if score_source == "euroleague":
+        return _euroleague_connector(home, away, commence_time)
     return _nba_connector(home, away, commence_time)  # default / "nba"
 
 

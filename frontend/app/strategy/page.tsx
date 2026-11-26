@@ -131,7 +131,7 @@ const DEDUP_MODES = [
   { value: "game", label: "One per game (earliest price)" },
 ] as const;
 
-const LEAGUE_OPTIONS = ["NCAA", "NBA"] as const;
+const LEAGUE_OPTIONS = ["NCAA", "NBA", "EuroLeague"] as const;
 const MARKET_OPTIONS = ["All", "Spread", "Total", "MoneyLine"] as const;
 
 const DIMENSION_ORDER = [
