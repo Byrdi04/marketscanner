@@ -152,8 +152,8 @@ LEAGUES = [
         "name": "NBA",
         "danske": {
             "tag": "18608",
-            "window": "rolling",        # rolling 24h window
-            "rolling_days": 1,
+            "window": "rolling",        # rolling window long enough to reach games 2+ days out
+            "rolling_days": 3,
             "max_events": 50,
             "exclusions": [],
         },
